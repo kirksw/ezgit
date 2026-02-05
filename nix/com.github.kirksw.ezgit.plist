@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.github.kirksw.ezgit</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@out@/bin/ezgit</string>
+        <string>cache</string>
+        <string>refresh</string>
+        <string>--force</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>86400</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/ezgit.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/ezgit.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/bin:/usr/bin:/usr/local/bin</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>AbandonProcessGroup</key>
+    <true/>
+</dict>
+</plist>
