@@ -1,0 +1,33 @@
+# GitHub Token (optional, falls back to GITHUB_TOKEN env var)
+[github]
+# token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Organizations to cache for faster access
+[organizations]
+orgs = [
+    "facebook",
+    "google",
+    "kubernetes",
+    "microsoft",
+]
+
+# Private repositories (owner/repo format)
+[repos]
+private = [
+    "my-org/secret-repo",
+    "company/internal",
+]
+
+# Git configuration
+[git]
+# Default directory for cloned repositories (optional)
+clone_dir = "~/git/github.com"
+# Clone as bare repo with worktree by default (optional, default: false)
+# worktree = true
+# Command used by `ezgit open` / open mode (optional).
+# Available placeholders:
+#   $org, $repo, $worktree, $repoPath, $orgRepo, $repoFullName, $absPath
+# Example for sesh:
+# open_command = "sesh connect \"$repoPath\""
+# Prompt to recommend shallow clone when repo size is at/above this threshold in KB (optional, 0 disables)
+# shallow_prompt_threshold_kb = 204800

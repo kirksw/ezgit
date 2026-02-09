@@ -1,0 +1,228 @@
+package cmd
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"github.com/kirksw/ezgit/internal/cache"
+	"github.com/kirksw/ezgit/internal/config"
+	"github.com/kirksw/ezgit/internal/git"
+	"github.com/kirksw/ezgit/internal/github"
+	"github.com/kirksw/ezgit/internal/ui"
+	"github.com/kirksw/ezgit/internal/utils"
+	"github.com/spf13/cobra"
+)
+
+const createNewWorktreeOption = "+ Create new worktree"
+
+var openCmd = &cobra.Command{
+	Use:   "open",
+	Short: "Open a locally cloned repository with the configured open command",
+	RunE:  runOpen,
+}
+
+func init() {
+	rootCmd.AddCommand(openCmd)
+}
+
+func runOpen(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	cloneDir := cfg.GetCloneDir()
+	if cloneDir == "" {
+		return fmt.Errorf("clone_dir must be set in config to use 'ezgit open'")
+	}
+
+	c := cache.New()
+	if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
+		fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
+	}
+
+	allRepos, err := c.GetAllRepos()
+	if err != nil {
+		return fmt.Errorf("failed to load cached repos: %w", err)
+	}
+
+	if len(allRepos) == 0 {
+		return fmt.Errorf("no cached repositories found. Run 'ezgit cache refresh' to fetch repos")
+	}
+
+	localRepos := utils.BuildLocalRepoMap(cloneDir, allRepos)
+
+	var localOnly []github.Repo
+	for _, repo := range allRepos {
+		if localRepos[repo.FullName] {
+			localOnly = append(localOnly, repo)
+		}
+	}
+
+	if len(localOnly) == 0 {
+		return fmt.Errorf("no locally cloned repositories found in %s", cloneDir)
+	}
+
+	result, err := ui.RunOpenFuzzySearch(localOnly, localRepos)
+	if err != nil {
+		return fmt.Errorf("cancelled: %w", err)
+	}
+
+	return runOpenRepoSelection(cfg, result.Repo, localOnly, localRepos, result.SelectedWorktree)
+}
+
+func runOpenRepoSelection(
+	cfg *config.Config,
+	repo *github.Repo,
+	localOnly []github.Repo,
+	localRepos map[string]bool,
+	selectedWorktree string,
+) error {
+	if repo == nil {
+		return nil
+	}
+
+	repoPath := getRepoPath(cfg, repo.FullName, false, repo.DefaultBranch)
+
+	gitMgr := git.New()
+	selectedWorktree, cancelled, err := selectOrCreateWorktreeForOpen(gitMgr, repoPath, repo, localOnly, localRepos, selectedWorktree)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		return nil
+	}
+
+	return runOpenCommand(cfg, repo.FullName, selectedWorktree)
+}
+
+func selectOrCreateWorktreeForOpen(
+	gitMgr git.GitManager,
+	repoPath string,
+	repo *github.Repo,
+	localOnly []github.Repo,
+	localRepos map[string]bool,
+	selectedWorktree string,
+) (string, bool, error) {
+	if strings.TrimSpace(selectedWorktree) != "" {
+		return selectedWorktree, false, nil
+	}
+
+	hasWorktrees, err := gitMgr.HasWorktrees(repoPath)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to check for worktrees: %w", err)
+	}
+	if !hasWorktrees {
+		return "", false, nil
+	}
+
+	worktrees, err := gitMgr.ListWorktrees(repoPath)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to list worktrees: %w", err)
+	}
+	selectionOptions := withCreateWorktreeOption(worktrees)
+	for {
+		result, err := ui.RunWorktreeSelection(localOnly, repo, false, localRepos, selectionOptions)
+		if err != nil {
+			return "", false, err
+		}
+		if result.Repo == nil {
+			return "", true, nil
+		}
+		if !isCreateWorktreeOption(result.SelectedWorktree) {
+			return result.SelectedWorktree, false, nil
+		}
+
+		branches, err := gitMgr.ListBranches(repoPath)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to list branches for new worktree: %w", err)
+		}
+
+		defaultBranch := strings.TrimSpace(repo.DefaultBranch)
+		if defaultBranch == "" {
+			defaultBranch = "main"
+		}
+
+		featureBranch, baseBranch, cancelled, err := ui.RunCreateWorktreePrompt(branches, defaultBranch)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to configure new worktree: %w", err)
+		}
+		if cancelled {
+			return "", true, nil
+		}
+
+		featureBranch = strings.TrimSpace(featureBranch)
+		baseBranch = strings.TrimSpace(baseBranch)
+		if featureBranch == "" {
+			continue
+		}
+		if containsString(worktrees, featureBranch) {
+			return "", false, fmt.Errorf("worktree %q already exists", featureBranch)
+		}
+		if baseBranch == "" {
+			baseBranch = defaultBranch
+		}
+
+		worktreePath := filepath.Join(repoPath, featureBranch)
+		if err := gitMgr.CreateFeatureWorktree(repoPath, worktreePath, featureBranch, baseBranch); err != nil {
+			return "", false, fmt.Errorf("failed to create worktree %q from %q: %w", featureBranch, baseBranch, err)
+		}
+
+		return featureBranch, false, nil
+	}
+}
+
+func withCreateWorktreeOption(worktrees []string) []string {
+	options := make([]string, 0, len(worktrees)+1)
+	options = append(options, worktrees...)
+	options = append(options, createNewWorktreeOption)
+	return options
+}
+
+func isCreateWorktreeOption(value string) bool {
+	return strings.TrimSpace(value) == createNewWorktreeOption
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func getRepoPath(cfg *config.Config, repoFullName string, isWorktree bool, defaultBranch string) string {
+	cloneDir := cfg.GetCloneDir()
+	if cloneDir == "" {
+		return ""
+	}
+
+	parts := strings.Split(repoFullName, "/")
+	if len(parts) != 2 {
+		return ""
+	}
+
+	owner, repoName := parts[0], parts[1]
+	repoPath := filepath.Join(cloneDir, owner, repoName)
+
+	if isWorktree {
+		branchName := defaultBranch
+		if branchName == "" {
+			c := cache.New()
+			allRepos, err := c.GetAllRepos()
+			if err == nil {
+				for _, r := range allRepos {
+					if r.FullName == repoFullName {
+						branchName = r.DefaultBranch
+						break
+					}
+				}
+			}
+		}
+		repoPath = filepath.Join(repoPath, branchName)
+	}
+
+	return repoPath
+}
