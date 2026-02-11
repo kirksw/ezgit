@@ -249,6 +249,12 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 
 	if worktree {
 		branchName := resolveDefaultBranch(repoInput, defaultBranch)
+
+		// Fix remote tracking: git clone --bare does not set a fetch refspec
+		// and turns all remote branches into local branches.
+		if err := gitMgr.ConfigureBareRemote(metadataPath, branchName); err != nil {
+			return fmt.Errorf("failed to configure bare remote: %w", err)
+		}
 		interactive := !quiet && isInteractiveStdin()
 		createDefaultWorktree := true
 		createReviewWorktree := true
