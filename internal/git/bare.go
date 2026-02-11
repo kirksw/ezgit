@@ -9,6 +9,46 @@ import (
 	"strings"
 )
 
+// ConfigureBareRemote fixes a bare clone so it has proper remote tracking.
+// git clone --bare does not set a fetch refspec and converts all remote
+// branches into local branches.  This method:
+//  1. Sets remote.origin.fetch so future fetches work.
+//  2. Runs git fetch to populate remote-tracking refs.
+//  3. Removes the stale local branches that --bare created (keeping only
+//     the default branch).
+func (g *gitManager) ConfigureBareRemote(barePath, defaultBranch string) error {
+	// 1. Set the fetch refspec that --bare omits.
+	if err := runGitCommand(barePath, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+		return fmt.Errorf("failed to set fetch refspec: %w", err)
+	}
+
+	// 2. Fetch to create proper remote-tracking refs.
+	if err := runGitCommand(barePath, "fetch", "origin"); err != nil {
+		return fmt.Errorf("failed to fetch from origin: %w", err)
+	}
+
+	// 3. Delete local branches that --bare created, except the default branch.
+	//    These are now redundant because remote-tracking refs exist.
+	cmd := exec.Command("git", "branch", "--format=%(refname:short)")
+	cmd.Dir = barePath
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to list local branches: %w", err)
+	}
+	for _, branch := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		branch = strings.TrimSpace(branch)
+		if branch == "" || branch == defaultBranch {
+			continue
+		}
+		if delErr := runGitCommand(barePath, "branch", "-D", branch); delErr != nil {
+			// Non-fatal: log and continue.
+			continue
+		}
+	}
+
+	return nil
+}
+
 func (g *gitManager) ConvertToBare(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return fmt.Errorf("path does not exist: %s", path)

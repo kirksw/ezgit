@@ -34,6 +34,66 @@ func makeCommit(t *testing.T, repoDir, fileName, content, message string) {
 	runGit(t, repoDir, "commit", "-m", message)
 }
 
+func TestConfigureBareRemoteSetsUpRemoteTracking(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a "remote" bare repo with two branches.
+	originDir := filepath.Join(tmpDir, "origin.git")
+	seedDir := filepath.Join(tmpDir, "seed")
+
+	runGit(t, "", "init", "--bare", originDir)
+	runGit(t, "", "clone", originDir, seedDir)
+	runGit(t, seedDir, "config", "user.email", "test@example.com")
+	runGit(t, seedDir, "config", "user.name", "test")
+	makeCommit(t, seedDir, "README.md", "hello\n", "initial commit")
+	runGit(t, seedDir, "push", "origin", "HEAD:main")
+
+	runGit(t, seedDir, "checkout", "-b", "feature-a")
+	makeCommit(t, seedDir, "a.txt", "a\n", "feature-a commit")
+	runGit(t, seedDir, "push", "origin", "feature-a")
+
+	// Bare-clone (mimics what ezgit does).
+	bareDir := filepath.Join(tmpDir, "repo", ".git")
+	runGit(t, "", "clone", "--bare", originDir, bareDir)
+
+	// Verify broken state BEFORE fix: no fetch refspec, branches are local.
+	cfgCmd := exec.Command("git", "config", "--get", "remote.origin.fetch")
+	cfgCmd.Dir = bareDir
+	if err := cfgCmd.Run(); err == nil {
+		t.Fatal("expected no remote.origin.fetch before ConfigureBareRemote")
+	}
+
+	// Apply fix.
+	gitMgr := New()
+	if err := gitMgr.ConfigureBareRemote(bareDir, "main"); err != nil {
+		t.Fatalf("ConfigureBareRemote() error = %v", err)
+	}
+
+	// Verify fetch refspec is set.
+	refspec := strings.TrimSpace(runGit(t, bareDir, "config", "--get", "remote.origin.fetch"))
+	if refspec != "+refs/heads/*:refs/remotes/origin/*" {
+		t.Fatalf("remote.origin.fetch = %q, want +refs/heads/*:refs/remotes/origin/*", refspec)
+	}
+
+	// Verify remote-tracking branches exist.
+	remoteBranches := strings.TrimSpace(runGit(t, bareDir, "branch", "-r", "--format=%(refname:short)"))
+	if !strings.Contains(remoteBranches, "origin/main") {
+		t.Fatalf("expected origin/main in remote branches, got: %s", remoteBranches)
+	}
+	if !strings.Contains(remoteBranches, "origin/feature-a") {
+		t.Fatalf("expected origin/feature-a in remote branches, got: %s", remoteBranches)
+	}
+
+	// Verify stale local branches were cleaned up (only main should remain).
+	localBranches := strings.TrimSpace(runGit(t, bareDir, "branch", "--format=%(refname:short)"))
+	for _, b := range strings.Split(localBranches, "\n") {
+		b = strings.TrimSpace(b)
+		if b != "" && b != "main" {
+			t.Fatalf("expected only main as local branch, but found %q in: %s", b, localBranches)
+		}
+	}
+}
+
 func TestConvertToBareProducesBareRepository(t *testing.T) {
 	tmpDir := t.TempDir()
 	repoDir := filepath.Join(tmpDir, "repo")
