@@ -1,0 +1,26 @@
+name: Version Guard
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        shell: bash
+        run: git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+
+      - name: Validate version bump policy
+        shell: bash
+        run: scripts/check-version-bump.sh "origin/${{ github.base_ref }}"

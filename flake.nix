@@ -13,7 +13,7 @@
       in {
         packages.default = pkgs.buildGoModule {
           pname = "ezgit";
-          version = "0.0.1";
+          version = pkgs.lib.strings.removeSuffix "\n" (builtins.readFile ./internal/version/VERSION);
           src = pkgs.lib.cleanSource ./.;
           vendorHash = "sha256-sq+Q0x1+MAoH/0X0cK3cil/JEYLKk4C/R/nvUGE+F0Y=";
           nativeCheckInputs = with pkgs; [ git ];

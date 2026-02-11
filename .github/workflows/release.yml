@@ -19,6 +19,9 @@ jobs:
       tag: ${{ steps.semver.outputs.tag }}
       prerelease: ${{ steps.semver.outputs.prerelease }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Validate semantic version tag
         id: semver
         shell: bash
@@ -37,6 +40,10 @@ jobs:
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Validate tag matches repository version
+        shell: bash
+        run: scripts/check-tag-version.sh "${{ steps.semver.outputs.tag }}"
 
   build:
     runs-on: ubuntu-latest

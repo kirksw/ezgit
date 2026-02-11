@@ -106,6 +106,19 @@ go test ./...
 nix run .# -- --help
 ```
 
+Enable local git hooks (recommended):
+
+```bash
+./scripts/install-hooks.sh
+```
+
+## Versioning
+
+- Canonical version source: `internal/version/VERSION`.
+- `ezgit version` reads from that file at build time.
+- Pull requests to `main` fail if code changes are made without a version bump and release note update.
+- Tagged releases fail if the tag (for example `v0.0.3`) does not match `internal/version/VERSION`.
+
 ## License
 
 MIT
