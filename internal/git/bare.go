@@ -123,6 +123,16 @@ func (g *gitManager) runWorktreeAdd(barePath, worktreePath string, prePathArgs [
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
+	// Idempotency guard: if this exact worktree path is already registered,
+	// treat the operation as successful.
+	alreadyRegistered, err := g.isWorktreeRegistered(barePath, absWorktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to inspect existing worktrees: %w", err)
+	}
+	if alreadyRegistered {
+		return nil
+	}
+
 	gitArgs := []string{"worktree", "add"}
 	gitArgs = append(gitArgs, prePathArgs...)
 	gitArgs = append(gitArgs, absWorktreePath)
@@ -130,10 +140,54 @@ func (g *gitManager) runWorktreeAdd(barePath, worktreePath string, prePathArgs [
 	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = barePath
 	if output, err := cmd.CombinedOutput(); err != nil {
+		// If another code path created the same worktree just before this call,
+		// tolerate the "already exists" error only when the worktree is now registered.
+		if strings.Contains(string(output), "already exists") {
+			registeredNow, checkErr := g.isWorktreeRegistered(barePath, absWorktreePath)
+			if checkErr == nil && registeredNow {
+				return nil
+			}
+		}
 		return fmt.Errorf("failed to create worktree: %w\n%s", err, string(output))
 	}
 
 	return nil
+}
+
+func (g *gitManager) isWorktreeRegistered(barePath, worktreePath string) (bool, error) {
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = barePath
+	output, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+
+	target := normalizePathForCompare(worktreePath)
+	for _, line := range strings.Split(string(output), "\n") {
+		if !strings.HasPrefix(line, "worktree ") {
+			continue
+		}
+		path := strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+		if path == "" {
+			continue
+		}
+		if normalizePathForCompare(path) == target {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func normalizePathForCompare(path string) string {
+	normalized := filepath.Clean(path)
+	if abs, err := filepath.Abs(normalized); err == nil {
+		normalized = abs
+	}
+	if eval, err := filepath.EvalSymlinks(normalized); err == nil {
+		normalized = eval
+	}
+	return normalized
 }
 
 func (g *gitManager) ListBranches(path string) ([]string, error) {

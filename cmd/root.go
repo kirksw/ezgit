@@ -8,9 +8,10 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "ezgit",
-	Short: "An easy GitHub repository management CLI tool",
-	Long:  `ezgit helps manage GitHub repositories with support for cloning, bare conversions, worktrees, and caching.`,
+	Use:           "ezgit",
+	Short:         "An easy GitHub repository management CLI tool",
+	Long:          `ezgit helps manage GitHub repositories with support for cloning, bare conversions, worktrees, and caching.`,
+	SilenceErrors: true,
 }
 
 var (

@@ -323,3 +323,82 @@ func TestCreateFeatureWorktreeFromBaseBranch(t *testing.T) {
 		t.Fatalf("feature worktree HEAD = %q, want %q", head, featureBranch)
 	}
 }
+
+func TestCreateDetachedWorktreeIsIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+
+	runGit(t, "", "init", repoDir)
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "test")
+	makeCommit(t, repoDir, "README.md", "hello\n", "initial commit")
+
+	defaultBranch := strings.TrimSpace(runGit(t, repoDir, "branch", "--show-current"))
+	if defaultBranch == "" {
+		t.Fatal("expected current branch name")
+	}
+
+	gitMgr := New()
+	if err := gitMgr.ConvertToBare(repoDir); err != nil {
+		t.Fatalf("ConvertToBare() error = %v", err)
+	}
+
+	defaultWorktreePath := filepath.Join(repoDir, defaultBranch)
+	if err := gitMgr.CreateWorktree(filepath.Join(repoDir, ".git"), defaultWorktreePath, defaultBranch); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	reviewPath := filepath.Join(repoDir, "review")
+	if err := gitMgr.CreateDetachedWorktree(filepath.Join(repoDir, ".git"), reviewPath, defaultBranch); err != nil {
+		t.Fatalf("CreateDetachedWorktree(first) error = %v", err)
+	}
+	if err := gitMgr.CreateDetachedWorktree(filepath.Join(repoDir, ".git"), reviewPath, defaultBranch); err != nil {
+		t.Fatalf("CreateDetachedWorktree(second) error = %v", err)
+	}
+
+	head := strings.TrimSpace(runGit(t, reviewPath, "rev-parse", "--abbrev-ref", "HEAD"))
+	if head != "HEAD" {
+		t.Fatalf("expected detached HEAD in review worktree, got %q", head)
+	}
+}
+
+func TestCreateDetachedWorktreeFailsWhenPathExistsButNotRegistered(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+
+	runGit(t, "", "init", repoDir)
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "test")
+	makeCommit(t, repoDir, "README.md", "hello\n", "initial commit")
+
+	defaultBranch := strings.TrimSpace(runGit(t, repoDir, "branch", "--show-current"))
+	if defaultBranch == "" {
+		t.Fatal("expected current branch name")
+	}
+
+	gitMgr := New()
+	if err := gitMgr.ConvertToBare(repoDir); err != nil {
+		t.Fatalf("ConvertToBare() error = %v", err)
+	}
+
+	defaultWorktreePath := filepath.Join(repoDir, defaultBranch)
+	if err := gitMgr.CreateWorktree(filepath.Join(repoDir, ".git"), defaultWorktreePath, defaultBranch); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	reviewPath := filepath.Join(repoDir, "review")
+	if err := os.MkdirAll(reviewPath, 0755); err != nil {
+		t.Fatalf("failed to create review path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(reviewPath, "README.md"), []byte("not a worktree"), 0644); err != nil {
+		t.Fatalf("failed to write marker file: %v", err)
+	}
+
+	err := gitMgr.CreateDetachedWorktree(filepath.Join(repoDir, ".git"), reviewPath, defaultBranch)
+	if err == nil {
+		t.Fatal("expected error when worktree path exists but is not registered")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
