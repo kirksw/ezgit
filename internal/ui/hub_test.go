@@ -53,7 +53,7 @@ func TestHubOpenModeConvertShortcut(t *testing.T) {
 	m.mode = HubModeOpen
 	m.refreshItems()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = updated.(hubModel)
 	if m.action != hubActionConvert {
 		t.Fatalf("action=%v, want convert", m.action)
@@ -69,7 +69,7 @@ func TestHubCloneWorktreeToggle(t *testing.T) {
 		t.Fatal("worktree should start false")
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
 	m = updated.(hubModel)
 	if !m.worktree {
 		t.Fatal("worktree should toggle on in clone mode")
@@ -80,13 +80,13 @@ func TestHubViewShowsConvertHintOnlyInOpenMode(t *testing.T) {
 	m := newHubModel(nil, nil, nil, nil, false)
 	m.mode = HubModeOpen
 	openView := m.View()
-	if !strings.Contains(openView, "c: convert") {
+	if !strings.Contains(openView, "ctrl+c: convert") {
 		t.Fatal("expected convert hint in open mode")
 	}
 
 	m.mode = HubModeClone
 	cloneView := m.View()
-	if strings.Contains(cloneView, "c: convert") {
+	if strings.Contains(cloneView, "ctrl+c: convert") {
 		t.Fatal("did not expect convert hint in clone mode")
 	}
 }

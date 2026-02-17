@@ -153,7 +153,7 @@ func (m hubModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case tea.KeyCtrlQ, tea.KeyEsc:
 			m.cancelled = true
 			m.quitting = true
 			return m, tea.Quit
@@ -171,6 +171,19 @@ func (m hubModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyUp, tea.KeyCtrlP:
 			m.list.CursorUp()
 			return m, nil
+		case tea.KeyCtrlW:
+			if m.mode == HubModeClone {
+				m.worktree = !m.worktree
+				return m, nil
+			}
+		case tea.KeyCtrlC:
+			if m.mode == HubModeOpen {
+				if !m.captureSelection(hubActionConvert) {
+					return m, nil
+				}
+				m.quitting = true
+				return m, tea.Quit
+			}
 		case tea.KeyEnter:
 			if !m.captureSelection(hubActionEnter) {
 				return m, nil
@@ -193,19 +206,6 @@ func (m hubModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = HubModeConnect
 			m.refreshItems()
 			return m, nil
-		case "w":
-			if m.mode == HubModeClone {
-				m.worktree = !m.worktree
-				return m, nil
-			}
-		case "c":
-			if m.mode == HubModeOpen {
-				if !m.captureSelection(hubActionConvert) {
-					return m, nil
-				}
-				m.quitting = true
-				return m, tea.Quit
-			}
 		}
 	}
 
@@ -359,9 +359,9 @@ func (m hubModel) View() string {
 		if m.worktree {
 			worktreeState = "on"
 		}
-		instructions = fmt.Sprintf("up/down: navigate | tab/left/right: mode | w: worktree (%s) | enter: clone | esc: cancel", worktreeState)
+		instructions = fmt.Sprintf("up/down: navigate | tab/left/right: mode | ctrl+w: worktree (%s) | enter: clone | esc: cancel", worktreeState)
 	case HubModeOpen:
-		instructions = "up/down: navigate | tab/left/right: mode | c: convert | enter: open | esc: cancel"
+		instructions = "up/down: navigate | tab/left/right: mode | ctrl+c: convert | enter: open | esc: cancel"
 	case HubModeConnect:
 		instructions = "up/down: navigate | tab/left/right: mode | enter: connect | esc: cancel"
 	}

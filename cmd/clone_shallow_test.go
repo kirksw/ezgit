@@ -215,3 +215,27 @@ func TestResolveOpenTargetPathWithoutWorktree(t *testing.T) {
 		t.Fatalf("resolveOpenTargetPath()=%q, want %q", got, want)
 	}
 }
+
+func TestResolveRepoPathsUsesCloneDir(t *testing.T) {
+	cfg := &config.Config{
+		Git: config.GitConfig{CloneDir: "/tmp/clones"},
+	}
+
+	dest, metadata, err := resolveRepoPaths(cfg, "lunarway/hubble-cli")
+	if err != nil {
+		t.Fatalf("resolveRepoPaths() error = %v", err)
+	}
+	if dest != "/tmp/clones/lunarway/hubble-cli" {
+		t.Fatalf("dest=%q, want %q", dest, "/tmp/clones/lunarway/hubble-cli")
+	}
+	if metadata != "/tmp/clones/lunarway/hubble-cli/.git" {
+		t.Fatalf("metadata=%q, want %q", metadata, "/tmp/clones/lunarway/hubble-cli/.git")
+	}
+}
+
+func TestAddWorktreeToRepoRejectsEmptyName(t *testing.T) {
+	err := addWorktreeToRepo(nil, "lunarway/hubble-cli", "/tmp/repo", "/tmp/repo/.git", "   ")
+	if err == nil {
+		t.Fatal("expected error for empty worktree name")
+	}
+}

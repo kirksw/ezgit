@@ -16,25 +16,34 @@ import (
 )
 
 var cloneCmd = &cobra.Command{
-	Use:   "clone [repo]",
+	Use:   "clone [repo] [worktreename]",
 	Short: "Clone a GitHub repository",
-	Args:  cobra.MaximumNArgs(1),
+	Args:  cobra.MaximumNArgs(2),
 	RunE:  runClone,
 }
 
+var addCmd = &cobra.Command{
+	Use:   "add <repo> <worktreename>",
+	Short: "Add a worktree to a repository",
+	Args:  cobra.ExactArgs(2),
+	RunE:  runAdd,
+}
+
 var (
-	worktree          bool
-	branch            string
-	depth             int
-	quiet             bool
-	keyPath           string
-	cloneDest         string
-	featureWorktree   string
-	featureBaseBranch string
+	worktree           bool
+	branch             string
+	depth              int
+	quiet              bool
+	keyPath            string
+	cloneDest          string
+	featureWorktree    string
+	featureBaseBranch  string
+	skipWorktreePrompt bool // set internally to bypass interactive worktree prompts
 )
 
 func init() {
 	rootCmd.AddCommand(cloneCmd)
+	rootCmd.AddCommand(addCmd)
 
 	cloneCmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "clone metadata into .git and create worktree(s)")
 	cloneCmd.Flags().StringVarP(&branch, "branch", "b", "", "clone specific branch")
@@ -44,6 +53,15 @@ func init() {
 	cloneCmd.Flags().StringVarP(&cloneDest, "dest", "d", "", "destination directory")
 	cloneCmd.Flags().StringVar(&featureWorktree, "feature", "", "create an additional feature worktree using this branch name (worktree mode)")
 	cloneCmd.Flags().StringVar(&featureBaseBranch, "feature-base", "", "base branch for --feature (defaults to repository default branch)")
+}
+
+func runAdd(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	return runCloneWithWorktree(cfg, args[0], args[1])
 }
 
 func resolveClonePaths(dest string, asWorktree bool) (cloneTarget string, metadataPath string) {
@@ -100,6 +118,11 @@ func runClone(cmd *cobra.Command, args []string) error {
 
 	if len(args) == 0 {
 		return runFuzzyClone(cfg, cfg.Git.SeshOpen)
+	}
+
+	if len(args) == 2 {
+		worktreeName := args[1]
+		return runCloneWithWorktree(cfg, args[0], worktreeName)
 	}
 
 	return runDirectClone(cfg, args[0], "", 0)
@@ -220,7 +243,7 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 	}
 
 	cloneDepth := depth
-	if !quiet && isInteractiveStdin() {
+	if !skipWorktreePrompt && !quiet && isInteractiveStdin() {
 		cloneDepth = resolveCloneDepthForLargeRepo(cfg, repoInput, repoSizeHintKB, cloneDepth, os.Stdin, os.Stdout)
 	}
 
@@ -255,7 +278,7 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 		if err := gitMgr.ConfigureBareRemote(metadataPath, branchName); err != nil {
 			return fmt.Errorf("failed to configure bare remote: %w", err)
 		}
-		interactive := !quiet && isInteractiveStdin()
+		interactive := !skipWorktreePrompt && !quiet && isInteractiveStdin()
 		createDefaultWorktree := true
 		createReviewWorktree := true
 		requestCustomWorktree := false
@@ -343,6 +366,119 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 	}
 
 	return nil
+}
+
+// runCloneWithWorktree handles `ezgit clone <repo> <worktreename>`.
+// If the repo is already cloned, it just adds the worktree without prompts.
+// If not yet cloned, it clones with default worktrees (default branch + review)
+// plus the specified worktree, all without prompts.
+func runCloneWithWorktree(cfg *config.Config, repoInput string, worktreeName string) error {
+	worktreeName = strings.TrimSpace(worktreeName)
+	if worktreeName == "" {
+		return fmt.Errorf("worktree name cannot be empty")
+	}
+
+	// Force worktree mode.
+	originalWorktree := worktree
+	worktree = true
+	defer func() {
+		worktree = originalWorktree
+	}()
+
+	dest, metadataPath, err := resolveRepoPaths(cfg, repoInput)
+	if err != nil {
+		return err
+	}
+
+	gitMgr := git.New()
+
+	// Check if the repo is already cloned (bare metadata exists).
+	if _, err := os.Stat(metadataPath); err == nil {
+		// Already cloned — just add the worktree.
+		return addWorktreeToRepo(gitMgr, repoInput, dest, metadataPath, worktreeName)
+	}
+
+	// Not cloned yet — perform full clone with defaults + the specified worktree, no prompts.
+	originalFeatureWorktree := featureWorktree
+	originalFeatureBaseBranch := featureBaseBranch
+	originalSkipPrompt := skipWorktreePrompt
+	featureWorktree = worktreeName
+	featureBaseBranch = ""
+	skipWorktreePrompt = true
+	defer func() {
+		featureWorktree = originalFeatureWorktree
+		featureBaseBranch = originalFeatureBaseBranch
+		skipWorktreePrompt = originalSkipPrompt
+	}()
+
+	if err := runDirectClone(cfg, repoInput, "", 0); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// addWorktreeToRepo creates a feature worktree in an existing bare repo.
+func addWorktreeToRepo(gitMgr git.GitManager, repoInput string, dest string, metadataPath string, worktreeName string) error {
+	worktreeName = strings.TrimSpace(worktreeName)
+	if worktreeName == "" {
+		return fmt.Errorf("worktree name cannot be empty")
+	}
+
+	branchName := resolveDefaultBranch(repoInput, "")
+	featureBranch, baseBranch, err := resolveFeatureWorktreeConfig(branchName, worktreeName, "")
+	if err != nil {
+		return err
+	}
+
+	if featureBranch == "" {
+		return nil
+	}
+
+	worktreePath := filepath.Join(dest, worktreeName)
+
+	if !quiet {
+		fmt.Printf("Creating feature worktree %q from %q\n", worktreeName, branchName)
+	}
+	if err := gitMgr.CreateFeatureWorktree(metadataPath, worktreePath, featureBranch, baseBranch); err != nil {
+		return fmt.Errorf("failed to create worktree %s: %w", worktreeName, err)
+	}
+	if !quiet {
+		fmt.Printf("Worktree created: %s\n", worktreePath)
+	}
+	return nil
+}
+
+// resolveRepoPaths returns the repo destination directory and the bare metadata path.
+func resolveRepoPaths(cfg *config.Config, repoInput string) (dest string, metadataPath string, err error) {
+	if cloneDest != "" {
+		dest = cloneDest
+	} else {
+		owner, repoName, parseErr := config.ParseOwnerRepo(repoInput)
+		if parseErr != nil {
+			parts := strings.Split(repoInput, "/")
+			if len(parts) == 2 {
+				owner = parts[0]
+				repoName = parts[1]
+			} else {
+				repoName = filepath.Base(repoInput)
+			}
+		}
+
+		cloneDir := cfg.GetCloneDir()
+		if cloneDir != "" {
+			if owner != "" {
+				dest = filepath.Join(cloneDir, owner, repoName)
+			} else {
+				dest = filepath.Join(cloneDir, repoName)
+			}
+		} else {
+			dest = filepath.Join(".", repoName)
+		}
+	}
+
+	metadataPath = filepath.Join(dest, ".git")
+	return dest, metadataPath, nil
 }
 
 func resolveOpenTargetPath(repoPath, selectedWorktree string) string {

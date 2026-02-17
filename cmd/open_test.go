@@ -32,3 +32,13 @@ func TestContainsString(t *testing.T) {
 		t.Fatal("did not expect containsString to find missing value")
 	}
 }
+
+func TestRunOpenRequiresWorktreeWhenRepoArgProvided(t *testing.T) {
+	err := runOpen(nil, []string{"lunarway/hubble-cli"})
+	if err == nil {
+		t.Fatal("expected usage error")
+	}
+	if err.Error() != "usage: ezgit open <repo> <worktree-name>" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

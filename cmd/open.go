@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -17,8 +19,9 @@ import (
 const createNewWorktreeOption = "+ Create new worktree"
 
 var openCmd = &cobra.Command{
-	Use:   "open",
+	Use:   "open [repo] [worktree-name]",
 	Short: "Open a locally cloned repository with the configured open command",
+	Args:  cobra.MaximumNArgs(2),
 	RunE:  runOpen,
 }
 
@@ -27,6 +30,13 @@ func init() {
 }
 
 func runOpen(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		if len(args) != 2 {
+			return fmt.Errorf("usage: ezgit open <repo> <worktree-name>")
+		}
+		return runOpenDirect(args[0], args[1])
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -70,6 +80,50 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	}
 
 	return runOpenRepoSelection(cfg, result.Repo, localOnly, localRepos, result.SelectedWorktree)
+}
+
+func runOpenDirect(repoInput string, worktreeName string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	repoFullName, ok := extractRepoFullName(repoInput)
+	if !ok {
+		return fmt.Errorf("invalid repo format: %s", repoInput)
+	}
+
+	worktreeName = strings.TrimSpace(worktreeName)
+	if worktreeName == "" {
+		return fmt.Errorf("worktree name cannot be empty")
+	}
+
+	if err := runCloneWithWorktree(cfg, repoFullName, worktreeName); err != nil {
+		return err
+	}
+
+	repoRootPath := getRepoPath(cfg, repoFullName, false, "")
+	if repoRootPath == "" {
+		return fmt.Errorf("failed to resolve local path for %s", repoFullName)
+	}
+
+	absPath := resolveOpenTargetPath(repoRootPath, worktreeName)
+	if _, err := os.Stat(absPath); err != nil {
+		return fmt.Errorf("worktree path does not exist: %s", absPath)
+	}
+
+	return runSeshConnect(absPath)
+}
+
+func runSeshConnect(absPath string) error {
+	cmd := exec.Command("sesh", "connect", absPath)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to open session for %q: %w", absPath, err)
+	}
+	return nil
 }
 
 func runOpenRepoSelection(
