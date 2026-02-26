@@ -7,6 +7,7 @@ import (
 
 	"github.com/kirksw/ezgit/internal/cache"
 	"github.com/kirksw/ezgit/internal/config"
+	"github.com/kirksw/ezgit/internal/git"
 	"github.com/kirksw/ezgit/internal/github"
 	"github.com/kirksw/ezgit/internal/ui"
 	"github.com/kirksw/ezgit/internal/utils"
@@ -77,7 +78,10 @@ func runRootFuzzy(cfg *config.Config) error {
 	}
 
 	localRepos := utils.BuildLocalRepoMap(cfg.GetCloneDir(), allRepos)
-	result, err := ui.RunOpenFuzzySearch(allRepos, localRepos)
+	openedRepos := buildOpenedRepoMap(allRepos)
+	openedWorktrees := buildOpenedWorktreeMap(allRepos)
+	worktreesByRepo := buildLocalRepoWorktreeMap(cfg, allRepos, localRepos)
+	result, err := ui.RunOpenFuzzySearchWithOpened(allRepos, localRepos, openedRepos, openedWorktrees, worktreesByRepo)
 	if err != nil {
 		return fmt.Errorf("cancelled: %w", err)
 	}
@@ -86,6 +90,16 @@ func runRootFuzzy(cfg *config.Config) error {
 	}
 
 	repo := result.Repo
+	if result.CreateWorktree {
+		if err := runCloneWithWorktreeAndBase(cfg, repo.FullName, result.SelectedWorktree, result.WorktreeBase); err != nil {
+			return err
+		}
+		if noOpen {
+			return nil
+		}
+		return runOpenCommand(cfg, repo.FullName, result.SelectedWorktree)
+	}
+
 	repoPath := getRepoPath(cfg, repo.FullName, false, repo.DefaultBranch)
 	localExists := false
 	if repoPath != "" {
@@ -164,13 +178,145 @@ func runRootFuzzy(cfg *config.Config) error {
 	if noOpen {
 		return nil
 	}
+	return runOpenCommand(cfg, repo.FullName, result.SelectedWorktree)
+}
 
-	localOnlyRepos := make([]github.Repo, 0, len(allRepos))
-	for _, r := range allRepos {
-		if localRepos[r.FullName] {
-			localOnlyRepos = append(localOnlyRepos, r)
+func buildOpenedRepoMap(allRepos []github.Repo) map[string]bool {
+	opened := make(map[string]bool)
+	sessions, err := listTmuxSessions()
+	if err != nil || len(sessions) == 0 {
+		return opened
+	}
+
+	for _, session := range sessions {
+		session = strings.TrimSpace(session)
+		if session == "" {
+			continue
+		}
+		for _, repo := range allRepos {
+			fullName := strings.TrimSpace(repo.FullName)
+			if fullName == "" {
+				continue
+			}
+			if sessionMatchesRepo(session, fullName) {
+				opened[fullName] = true
+			}
 		}
 	}
 
-	return runOpenRepoSelection(cfg, repo, localOnlyRepos, localRepos, result.SelectedWorktree)
+	return opened
+}
+
+func buildOpenedWorktreeMap(allRepos []github.Repo) map[string]map[string]bool {
+	opened := make(map[string]map[string]bool)
+	sessions, err := listTmuxSessions()
+	if err != nil || len(sessions) == 0 {
+		return opened
+	}
+
+	for _, session := range sessions {
+		session = strings.TrimSpace(session)
+		if session == "" {
+			continue
+		}
+		for _, repo := range allRepos {
+			repoFullName := strings.TrimSpace(repo.FullName)
+			if repoFullName == "" {
+				continue
+			}
+			worktree, ok := extractWorktreeFromSession(session, repoFullName)
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(worktree) == "" {
+				continue
+			}
+			if _, ok := opened[repoFullName]; !ok {
+				opened[repoFullName] = make(map[string]bool)
+			}
+			opened[repoFullName][worktree] = true
+		}
+	}
+
+	return opened
+}
+
+func buildLocalRepoWorktreeMap(cfg *config.Config, allRepos []github.Repo, localRepos map[string]bool) map[string][]string {
+	result := make(map[string][]string)
+	gitMgr := git.New()
+
+	for _, repo := range allRepos {
+		if !localRepos[repo.FullName] {
+			continue
+		}
+		repoPath := getRepoPath(cfg, repo.FullName, false, repo.DefaultBranch)
+		if strings.TrimSpace(repoPath) == "" {
+			continue
+		}
+		worktrees, err := gitMgr.ListWorktrees(repoPath)
+		if err != nil || len(worktrees) == 0 {
+			continue
+		}
+		result[repo.FullName] = worktrees
+	}
+
+	return result
+}
+
+func sessionMatchesRepo(session string, repoFullName string) bool {
+	session = strings.TrimSpace(session)
+	repoFullName = strings.TrimSpace(repoFullName)
+	if session == "" || repoFullName == "" {
+		return false
+	}
+
+	for _, marker := range repoSessionMarkers(repoFullName) {
+		if session == marker || strings.HasPrefix(session, marker+"/") {
+			return true
+		}
+		if strings.Contains(session, "/"+marker+"/") || strings.HasSuffix(session, "/"+marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func extractWorktreeFromSession(session string, repoFullName string) (string, bool) {
+	session = strings.TrimSpace(session)
+	repoFullName = strings.TrimSpace(repoFullName)
+	if session == "" || repoFullName == "" {
+		return "", false
+	}
+
+	for _, marker := range repoSessionMarkers(repoFullName) {
+		prefix := marker + "/"
+		if strings.HasPrefix(session, prefix) {
+			wt := strings.TrimSpace(strings.TrimPrefix(session, prefix))
+			return wt, wt != ""
+		}
+
+		idx := strings.Index(session, "/"+prefix)
+		if idx >= 0 {
+			start := idx + len("/"+prefix)
+			if start < len(session) {
+				wt := strings.TrimSpace(session[start:])
+				return wt, wt != ""
+			}
+		}
+	}
+
+	return "", false
+}
+
+func repoSessionMarkers(repoFullName string) []string {
+	repoFullName = strings.TrimSpace(repoFullName)
+	if repoFullName == "" {
+		return nil
+	}
+	normalized := strings.ReplaceAll(repoFullName, "/", "-")
+	if normalized == repoFullName {
+		return []string{repoFullName}
+	}
+	return []string{repoFullName, normalized}
 }

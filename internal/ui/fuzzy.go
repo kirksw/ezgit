@@ -31,30 +31,47 @@ func (d repoDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		return
 	}
 
-	prefix := ""
-	if repo.IsLocal {
-		prefix = "* "
-	}
+	localBadgeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("119")).
+		Background(lipgloss.Color("236")).
+		Padding(0, 1)
+	openBadgeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("81")).
+		Background(lipgloss.Color("236")).
+		Padding(0, 1)
 
-	str := fmt.Sprintf("%s%s/%s", prefix, repo.Owner, repo.Name)
-	if repo.Description != "" {
-		str += fmt.Sprintf("\n  %s", truncateString(repo.Description, 60))
-	}
-
-	var style lipgloss.Style
+	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	if index == m.Index() {
-		style = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
-	} else {
-		style = lipgloss.NewStyle()
+		nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+		descStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
 	}
 
-	fmt.Fprint(w, style.Render(str))
+	badges := make([]string, 0, 2)
+	if repo.IsLocal {
+		badges = append(badges, localBadgeStyle.Render("[local]"))
+	}
+	if repo.IsOpen {
+		badges = append(badges, openBadgeStyle.Render("[open]"))
+	}
+
+	line := nameStyle.Render(fmt.Sprintf("%s/%s", repo.Owner, repo.Name))
+	if len(badges) > 0 {
+		line = strings.Join(badges, " ") + " " + line
+	}
+
+	if repo.Description != "" {
+		line += fmt.Sprintf("\n  %s", descStyle.Render(truncateString(repo.Description, 60)))
+	}
+
+	fmt.Fprint(w, line)
 }
 
 type repoItem struct {
 	github.Repo
 	Owner   string
 	IsLocal bool
+	IsOpen  bool
 }
 
 func (i repoItem) FilterValue() string {
@@ -67,6 +84,8 @@ type FuzzySearchResult struct {
 	Worktree         bool
 	Action           Action
 	SelectedWorktree string
+	CreateWorktree   bool
+	WorktreeBase     string
 }
 
 type page int
@@ -78,24 +97,36 @@ const (
 )
 
 type model struct {
-	repos             []github.Repo
-	repoList          list.Model
-	textinput         textinput.Model
-	quitting          bool
-	selected          *github.Repo
-	worktree          bool
-	localOnly         bool
-	localRepos        map[string]bool
-	openMode          bool
-	currentPage       page
-	settingsIndex     int
-	worktrees         []string
-	worktreeIndex     int
-	width             int
-	height            int
-	lastInput         string
-	allowLocalToggle  bool
-	allowSettingsPage bool
+	repos              []github.Repo
+	repoList           list.Model
+	textinput          textinput.Model
+	quitting           bool
+	selected           *github.Repo
+	worktree           bool
+	localOnly          bool
+	filterIndex        int
+	localRepos         map[string]bool
+	openedRepos        map[string]bool
+	openedWorktrees    map[string]map[string]bool
+	openMode           bool
+	repoWorktrees      map[string][]string
+	worktreeSelection  map[string]int
+	focusWorktreePane  bool
+	creatingWorktree   bool
+	worktreeInput      textinput.Model
+	worktreeInputHint  string
+	selectedWorktree   string
+	createWorktree     bool
+	createWorktreeBase string
+	currentPage        page
+	settingsIndex      int
+	worktrees          []string
+	worktreeIndex      int
+	width              int
+	height             int
+	lastInput          string
+	allowLocalToggle   bool
+	allowSettingsPage  bool
 }
 
 func newModel(repos []github.Repo, worktree bool, localRepos map[string]bool, openMode bool) model {
@@ -130,8 +161,13 @@ func newModelWithControls(
 		repoList:          l,
 		worktree:          worktree,
 		localRepos:        localRepos,
+		openedRepos:       map[string]bool{},
+		openedWorktrees:   map[string]map[string]bool{},
+		repoWorktrees:     map[string][]string{},
+		worktreeSelection: map[string]int{},
 		openMode:          openMode,
 		localOnly:         false,
+		filterIndex:       0,
 		currentPage:       pageMain,
 		settingsIndex:     0,
 		width:             80,
@@ -140,10 +176,74 @@ func newModelWithControls(
 		allowSettingsPage: allowSettingsPage,
 	}
 
+	wtInput := textinput.New()
+	wtInput.Placeholder = "new-worktree[:base]"
+	wtInput.CharLimit = 256
+	wtInput.Width = 40
+	m.worktreeInput = wtInput
+
 	l.SetItems(m.filterRepos(""))
 	m.repoList = l
 
 	return m
+}
+
+func (m model) currentFilterLabel() string {
+	switch m.filterIndex {
+	case 1:
+		return "local"
+	case 2:
+		return "opened"
+	default:
+		return "all"
+	}
+}
+
+func (m *model) cycleFilter() {
+	m.filterIndex = (m.filterIndex + 1) % 3
+	m.localOnly = m.filterIndex == 1
+	m.repoList.SetItems(m.filterRepos(m.textinput.Value()))
+	m.repoList.ResetSelected()
+}
+
+func (m model) selectedRepoFromList() *github.Repo {
+	if item := m.repoList.SelectedItem(); item != nil {
+		if ri, ok := item.(repoItem); ok {
+			repo := ri.Repo
+			return &repo
+		}
+	}
+	return nil
+}
+
+func (m model) worktreeOptionsForRepo(repo *github.Repo) []string {
+	options := make([]string, 0)
+	if repo == nil {
+		options = append(options, "+ Create new worktree")
+		return options
+	}
+	for _, wt := range m.repoWorktrees[repo.FullName] {
+		trimmed := strings.TrimSpace(wt)
+		if trimmed == "" {
+			continue
+		}
+		options = append(options, trimmed)
+	}
+	options = append(options, "+ Create new worktree")
+	return options
+}
+
+func parseWorktreeInlineInput(input string) (name string, base string) {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(value, ":", 2)
+	name = strings.TrimSpace(parts[0])
+	if len(parts) == 2 {
+		base = strings.TrimSpace(parts[1])
+	}
+	return name, base
 }
 
 func (m model) Init() tea.Cmd {
@@ -155,13 +255,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.repoList.SetWidth(msg.Width)
-		listHeight := msg.Height - 8
+		listWidth := msg.Width
+		if m.openMode {
+			listWidth = msg.Width / 2
+			if listWidth < 40 {
+				listWidth = msg.Width
+			}
+		}
+		m.repoList.SetWidth(listWidth)
+		reservedLines := 14
+		if m.openMode {
+			reservedLines = 16
+		}
+		listHeight := msg.Height - reservedLines
 		if listHeight < 4 {
 			listHeight = 4
 		}
 		m.repoList.SetHeight(listHeight)
 		m.textinput.Width = msg.Width - 4
+		m.worktreeInput.Width = listWidth - 4
+		if m.worktreeInput.Width < 20 {
+			m.worktreeInput.Width = 20
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -172,16 +287,69 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.currentPage == pageMain {
+			if m.creatingWorktree {
+				switch msg.Type {
+				case tea.KeyEsc:
+					m.creatingWorktree = false
+					m.worktreeInputHint = ""
+					m.worktreeInput.Blur()
+					return m, nil
+				case tea.KeyEnter:
+					name, base := parseWorktreeInlineInput(m.worktreeInput.Value())
+					if name == "" {
+						m.worktreeInputHint = "Enter worktree name or name:base"
+						return m, nil
+					}
+					repo := m.selectedRepoFromList()
+					if repo == nil {
+						m.worktreeInputHint = "Select a repository first"
+						return m, nil
+					}
+					m.selected = repo
+					m.selectedWorktree = name
+					m.createWorktree = true
+					m.createWorktreeBase = base
+					m.quitting = true
+					return m, tea.Quit
+				}
+			}
+
 			switch msg.Type {
 			case tea.KeyEsc:
 				m.quitting = true
 				return m, tea.Quit
 
 			case tea.KeyEnter:
+				if m.openMode && m.focusWorktreePane {
+					repo := m.selectedRepoFromList()
+					if repo == nil {
+						return m, nil
+					}
+					options := m.worktreeOptionsForRepo(repo)
+					idx := m.worktreeSelection[repo.FullName]
+					if idx < 0 || idx >= len(options) {
+						idx = 0
+					}
+					selected := options[idx]
+					if selected == "+ Create new worktree" {
+						m.creatingWorktree = true
+						m.worktreeInputHint = ""
+						m.worktreeInput.SetValue("")
+						m.worktreeInput.Focus()
+						return m, nil
+					}
+
+					m.selected = repo
+					m.selectedWorktree = selected
+					m.quitting = true
+					return m, tea.Quit
+				}
+
 				if len(m.repoList.Items()) > 0 {
 					if item := m.repoList.SelectedItem(); item != nil {
 						if ri, ok := item.(repoItem); ok {
 							m.selected = &ri.Repo
+							m.selectedWorktree = ""
 							m.quitting = true
 							return m, tea.Quit
 						}
@@ -192,16 +360,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.allowLocalToggle {
 					return m, nil
 				}
-				m.localOnly = !m.localOnly
-				m.repoList.SetItems(m.filterRepos(m.textinput.Value()))
-				m.repoList.ResetSelected()
+				m.cycleFilter()
 				return m, nil
 
 			case tea.KeyDown, tea.KeyCtrlN:
-				m.repoList.CursorDown()
+				if m.openMode && m.focusWorktreePane {
+					repo := m.selectedRepoFromList()
+					if repo != nil {
+						options := m.worktreeOptionsForRepo(repo)
+						idx := m.worktreeSelection[repo.FullName]
+						idx = (idx + 1) % len(options)
+						m.worktreeSelection[repo.FullName] = idx
+					}
+				} else {
+					m.repoList.CursorDown()
+				}
 
 			case tea.KeyUp, tea.KeyCtrlP:
-				m.repoList.CursorUp()
+				if m.openMode && m.focusWorktreePane {
+					repo := m.selectedRepoFromList()
+					if repo != nil {
+						options := m.worktreeOptionsForRepo(repo)
+						idx := m.worktreeSelection[repo.FullName]
+						idx = (idx - 1 + len(options)) % len(options)
+						m.worktreeSelection[repo.FullName] = idx
+					}
+				} else {
+					m.repoList.CursorUp()
+				}
+
+			case tea.KeyRight:
+				if m.openMode {
+					m.focusWorktreePane = true
+					return m, nil
+				}
+
+			case tea.KeyLeft:
+				if m.openMode {
+					m.focusWorktreePane = false
+					return m, nil
+				}
 
 			case tea.KeyCtrlS:
 				if !m.allowSettingsPage {
@@ -261,6 +459,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.currentPage == pageMain && m.creatingWorktree {
+		input, cmd := m.worktreeInput.Update(msg)
+		m.worktreeInput = input
+		return m, cmd
+	}
+
 	ti, cmd := m.textinput.Update(msg)
 	m.textinput = ti
 
@@ -290,57 +494,183 @@ func (m model) View() string {
 
 func (m model) renderMainPage() string {
 	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("228")).
+		Foreground(lipgloss.Color("229")).
 		Bold(true)
 
-	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Italic(true)
+	searchBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1)
 
-	toggleOnStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("120")).
+	paneStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1)
+
+	focusedPaneStyle := paneStyle.Copy().
+		BorderForeground(lipgloss.Color("69"))
+
+	paneTitleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("223")).
 		Bold(true)
+
+	mutedTextStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241"))
 
 	var b strings.Builder
 
+	titleText := "Select a repository"
 	if m.openMode || m.localOnly {
-		b.WriteString(headerStyle.Render("Select a repository to open"))
+		titleText = "Select a repository to open"
 	} else {
-		b.WriteString(headerStyle.Render("Select a repository to clone"))
+		titleText = "Select a repository to clone"
 	}
-
-	if m.allowLocalToggle && m.localOnly {
-		b.WriteString("  ")
-		b.WriteString(toggleOnStyle.Render("filter: local"))
-	}
+	b.WriteString(headerStyle.Render(titleText))
 
 	b.WriteString("\n\n")
-	b.WriteString(m.textinput.View())
+
+	searchWidth := m.width - 2
+	if searchWidth < 24 {
+		searchWidth = 24
+	}
+	b.WriteString(searchBoxStyle.Width(searchWidth).Render(m.textinput.View()))
 	b.WriteString("\n\n")
 
-	if len(m.repoList.Items()) > 0 {
-		b.WriteString(m.repoList.View())
+	if m.openMode {
+		leftWidth := m.width / 2
+		if leftWidth < 40 {
+			leftWidth = m.width
+		}
+		rightWidth := m.width - leftWidth
+		if rightWidth < 34 {
+			rightWidth = 0
+			leftWidth = m.width
+		}
+
+		leftContent := mutedTextStyle.Render("No repos found")
+		if len(m.repoList.Items()) > 0 {
+			leftContent = m.repoList.View()
+		}
+
+		leftPane := paneStyle
+		if !m.focusWorktreePane {
+			leftPane = focusedPaneStyle
+		}
+		leftPaneContent := paneTitleStyle.Render("Repositories ["+strings.ToUpper(m.currentFilterLabel())+"]") + "\n\n" + leftContent
+		leftRendered := leftPane.Width(leftWidth - 1).Render(leftPaneContent)
+
+		if rightWidth > 0 {
+			rightPane := paneStyle
+			if m.focusWorktreePane {
+				rightPane = focusedPaneStyle
+			}
+
+			rightNormal := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+			rightSelected := lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+			rightCreate := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+			rightOpenBadge := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("81")).
+				Background(lipgloss.Color("236")).
+				Padding(0, 1)
+			rightMuted := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+
+			var right strings.Builder
+			repo := m.selectedRepoFromList()
+			right.WriteString(paneTitleStyle.Render("Worktrees"))
+			right.WriteString("\n\n")
+			if repo == nil {
+				right.WriteString(rightMuted.Render("Select a repository to view worktrees"))
+			} else {
+				options := m.worktreeOptionsForRepo(repo)
+				if len(options) == 1 && options[0] == "+ Create new worktree" {
+					right.WriteString(rightMuted.Render("No worktrees yet"))
+					right.WriteString("\n\n")
+				}
+				idx := m.worktreeSelection[repo.FullName]
+				if idx < 0 || idx >= len(options) {
+					idx = 0
+				}
+				for i, option := range options {
+					isSelected := m.focusWorktreePane && i == idx
+					isCreate := option == "+ Create new worktree"
+					label := option
+					if !isCreate {
+						if openedByRepo, ok := m.openedWorktrees[repo.FullName]; ok {
+							if openedByRepo[option] {
+								label = option + " " + rightOpenBadge.Render("[open]")
+							}
+						}
+					}
+
+					line := "  " + label
+					if isSelected {
+						right.WriteString(rightSelected.Render(line))
+					} else if isCreate {
+						right.WriteString(rightCreate.Render(line))
+					} else {
+						right.WriteString(rightNormal.Render(line))
+					}
+					right.WriteString("\n\n")
+				}
+				if m.creatingWorktree {
+					right.WriteString("\n")
+					right.WriteString(rightMuted.Render("Create inline: name[:base]"))
+					right.WriteString("\n")
+					right.WriteString(m.worktreeInput.View())
+					if strings.TrimSpace(m.worktreeInputHint) != "" {
+						right.WriteString("\n")
+						right.WriteString(rightMuted.Render(m.worktreeInputHint))
+					}
+				}
+			}
+
+			rightRendered := rightPane.Width(rightWidth - 1).Render(right.String())
+			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, rightRendered))
+		} else {
+			b.WriteString(leftRendered)
+		}
 	} else {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("No repos found"))
+		body := mutedTextStyle.Render("No repos found")
+		if len(m.repoList.Items()) > 0 {
+			body = m.repoList.View()
+		}
+		panelWidth := m.width - 1
+		if panelWidth < 40 {
+			panelWidth = 40
+		}
+		b.WriteString(paneStyle.Width(panelWidth).Render(paneTitleStyle.Render("Repositories ["+strings.ToUpper(m.currentFilterLabel())+"]") + "\n\n" + body))
 	}
 
-	b.WriteString("\n\n")
-
-	var instructions []string
-	instructions = append(instructions, "up/down: navigate")
+	keybinds := []string{"scope: " + strings.ToUpper(m.currentFilterLabel()), "↑/↓ move"}
 	if m.allowLocalToggle {
-		instructions = append(instructions, "tab: toggle local")
+		keybinds = append([]string{"tab: scope"}, keybinds...)
 	}
-	if m.allowSettingsPage {
-		instructions = append(instructions, "ctrl+s: settings")
+	if m.openMode {
+		keybinds = append(keybinds, "←/→ pane")
 	}
-	if m.openMode || m.localOnly {
-		instructions = append(instructions, "enter: open")
+	if m.creatingWorktree {
+		keybinds = append(keybinds, "name[:base]", "enter create")
+	} else if m.openMode && m.focusWorktreePane {
+		keybinds = append(keybinds, "enter open/create")
+	} else if m.openMode || m.localOnly {
+		keybinds = append(keybinds, "enter open")
 	} else {
-		instructions = append(instructions, "enter: clone")
+		keybinds = append(keybinds, "enter clone")
 	}
-	instructions = append(instructions, "esc: cancel")
-	b.WriteString(instructionStyle.Render(strings.Join(instructions, " | ")))
+	keybinds = append(keybinds, "esc cancel")
+
+	keybindBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Foreground(lipgloss.Color("245")).
+		Padding(0, 1)
+
+	b.WriteString("\n\n")
+	keybindWidth := m.width - 1
+	if keybindWidth < 40 {
+		keybindWidth = 40
+	}
+	b.WriteString(keybindBoxStyle.Width(keybindWidth).Render(strings.Join(keybinds, "  |  ")))
 
 	return b.String()
 }
@@ -468,6 +798,16 @@ func (m model) filterRepos(query string) []list.Item {
 	query = strings.ToLower(query)
 	var items []list.Item
 	for _, repo := range m.repos {
+		switch m.filterIndex {
+		case 1:
+			if !m.localRepos[repo.FullName] {
+				continue
+			}
+		case 2:
+			if !m.openedRepos[repo.FullName] {
+				continue
+			}
+		}
 		if m.localOnly && !m.localRepos[repo.FullName] {
 			continue
 		}
@@ -486,6 +826,7 @@ func (m model) filterRepos(query string) []list.Item {
 			Repo:    repo,
 			Owner:   owner,
 			IsLocal: m.localRepos[repo.FullName],
+			IsOpen:  m.openedRepos[repo.FullName],
 		})
 	}
 	return items
@@ -1169,8 +1510,24 @@ func RunFuzzySearch(repos []github.Repo, worktree bool, localRepos map[string]bo
 }
 
 func RunOpenFuzzySearch(repos []github.Repo, localRepos map[string]bool) (*FuzzySearchResult, error) {
+	return RunOpenFuzzySearchWithOpened(repos, localRepos, nil, nil, nil)
+}
+
+func RunOpenFuzzySearchWithOpened(repos []github.Repo, localRepos map[string]bool, openedRepos map[string]bool, openedWorktrees map[string]map[string]bool, worktreesByRepo map[string][]string) (*FuzzySearchResult, error) {
+	m := newModelWithControls(repos, false, localRepos, true, true, false)
+	if openedRepos != nil {
+		m.openedRepos = openedRepos
+	}
+	if openedWorktrees != nil {
+		m.openedWorktrees = openedWorktrees
+	}
+	if worktreesByRepo != nil {
+		m.repoWorktrees = worktreesByRepo
+	}
+	m.repoList.SetItems(m.filterRepos(m.textinput.Value()))
+
 	p := tea.NewProgram(
-		newModelWithControls(repos, false, localRepos, true, false, false),
+		m,
 		tea.WithAltScreen(),
 	)
 
@@ -1189,7 +1546,9 @@ func RunOpenFuzzySearch(repos []github.Repo, localRepos map[string]bool) (*Fuzzy
 			Repo:             m.selected,
 			Worktree:         m.worktree,
 			Action:           ActionOpen,
-			SelectedWorktree: "",
+			SelectedWorktree: m.selectedWorktree,
+			CreateWorktree:   m.createWorktree,
+			WorktreeBase:     m.createWorktreeBase,
 		}, nil
 	}
 

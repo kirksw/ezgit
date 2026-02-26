@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.0.10 - 2026-02-26
+
+Picker and worktree UX refinements:
+- Improved the no-arg `ezgit` picker with a richer split-pane layout and inline worktree creation from the right pane.
+- Added `all/local/opened` scope cycling with clearer status badges (`[local]`, `[open]`) and tmux session matching improvements for open detection.
+- Updated worktree list behavior to hide repo root, highlight opened worktrees, and keep keybind guidance in a bottom status box.
+- Added regression tests for picker state, tmux session matching, and worktree inline parsing.
+
 ## 0.0.9 - 2026-02-26
 
 Release version injection fix:

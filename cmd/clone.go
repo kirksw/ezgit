@@ -95,7 +95,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	return runCloneWithWorktree(cfg, args[0], args[1])
+	return runCloneWithWorktreeAndBase(cfg, args[0], args[1], "")
 }
 
 func resolveClonePaths(dest string, asWorktree bool) (cloneTarget string, metadataPath string) {
@@ -495,10 +495,15 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 // If not yet cloned, it clones with default worktrees (default branch + review)
 // plus the specified worktree, all without prompts.
 func runCloneWithWorktree(cfg *config.Config, repoInput string, worktreeName string) error {
+	return runCloneWithWorktreeAndBase(cfg, repoInput, worktreeName, "")
+}
+
+func runCloneWithWorktreeAndBase(cfg *config.Config, repoInput string, worktreeName string, baseBranch string) error {
 	worktreeName = strings.TrimSpace(worktreeName)
 	if worktreeName == "" {
 		return fmt.Errorf("worktree name cannot be empty")
 	}
+	baseBranch = strings.TrimSpace(baseBranch)
 
 	// Force worktree mode.
 	originalWorktree := worktree
@@ -555,7 +560,7 @@ func runCloneWithWorktree(cfg *config.Config, repoInput string, worktreeName str
 	originalFeatureBaseBranch := featureBaseBranch
 	originalSkipPrompt := skipWorktreePrompt
 	featureWorktree = worktreeName
-	featureBaseBranch = ""
+	featureBaseBranch = baseBranch
 	skipWorktreePrompt = true
 	defer func() {
 		featureWorktree = originalFeatureWorktree

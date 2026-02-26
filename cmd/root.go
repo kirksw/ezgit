@@ -14,6 +14,7 @@ var rootCmd = &cobra.Command{
 	Short:         "An easy GitHub repository management CLI tool",
 	Long:          `ezgit helps manage GitHub repositories with support for cloning, bare conversions, worktrees, and caching.`,
 	SilenceErrors: true,
+	SilenceUsage:  true,
 	RunE:          runRoot,
 }
 

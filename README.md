@@ -49,6 +49,15 @@ Primary command. It ensures local state, then runs `open_command` unless `--no-o
 - `ezgit owner/repo`: ensure repo exists (regular clone), then open.
 - `ezgit owner/repo worktree`: ensure worktree exists (worktree layout), then open.
 
+No-arg picker shortcuts:
+
+- `tab`: toggle repo scope `all -> local -> opened`.
+- `left/right`: switch focus between repo list and worktree pane.
+- `enter` in repo pane: open repo root.
+- `enter` in worktree pane: open selected worktree (repo root is intentionally hidden there).
+- `enter` on `+ Create new worktree`: inline create mode (`name[:base]`) and create+open on confirm.
+- `esc` / `ctrl+c`: cancel.
+
 Flags: `--no-open`, `-b` branch, `--depth` shallow clone depth, `-q` quiet, `--key-path` SSH key, `-d` destination directory, `--feature`, `--feature-base`.
 
 Worktree mode is now implicit:
