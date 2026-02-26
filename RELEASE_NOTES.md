@@ -1,5 +1,10 @@
 # Release Notes
 
+## 0.0.8 - 2026-02-26
+
+Packaging/version output fix:
+- Updated Nix flake build settings to inject a release version at link time for non-local flake builds, preventing release-tag builds from reporting `0.0.0-dev` in `ezgit version`.
+
 ## 0.0.7 - 2026-02-26
 
 Unified command interface and worktree UX improvements:
