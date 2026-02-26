@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.0.7 - 2026-02-26
+
+Unified command interface and worktree UX improvements:
+- Collapsed primary flows into `ezgit [owner/repo] [worktree]` with `--no-open`, removing separate clone/open/add/connect/tui command surface from help.
+- Removed config-driven default worktree mode so regular clones remain possible unless worktree intent is explicit.
+- Added dynamic worktree planning UI for clone/convert to add or remove multiple custom worktrees inline.
+- Updated docs and config examples for `open_command`, including fixed `sesh` usage with absolute path and a tmux session example using `org/repo[/worktree]` names.
+
 ## 0.0.6 - 2026-02-26
 
 Clone/worktree reliability and cache behavior fixes:

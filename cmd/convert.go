@@ -101,8 +101,7 @@ func runConvertPath(repoPath, repoDefaultBranch string) error {
 
 	createDefaultWorktree := true
 	createReviewWorktree := true
-	featureBranch := ""
-	baseBranch := ""
+	customWorktrees := make([]ui.CloneWorktreeSpec, 0)
 	defaultBranch := ""
 
 	useDefaultWorktreeFlow := !noWorktrees && !allWorktrees && len(worktrees) == 0
@@ -114,29 +113,17 @@ func runConvertPath(repoPath, repoDefaultBranch string) error {
 		defaultBranch = resolveConvertDefaultBranch(repoDefaultBranch, branches)
 
 		if isInteractiveStdin() {
-			requestCustomWorktree := false
-			var cancelled bool
-			createDefaultWorktree, createReviewWorktree, requestCustomWorktree, cancelled, err = ui.RunCloneWorktreeOptionsPrompt(defaultBranch)
-			if err != nil {
-				return fmt.Errorf("failed to configure convert worktree options: %w", err)
+			plan, cancelled, planErr := ui.RunCloneWorktreePlanPrompt(branches, defaultBranch, true)
+			if planErr != nil {
+				return fmt.Errorf("failed to configure convert worktree options: %w", planErr)
 			}
 			if cancelled {
 				return fmt.Errorf("cancelled")
 			}
 
-			if requestCustomWorktree {
-				featureBranch, baseBranch, cancelled, err = ui.RunCreateWorktreePrompt(branches, defaultBranch)
-				if err != nil {
-					return fmt.Errorf("failed to configure custom worktree: %w", err)
-				}
-				if cancelled {
-					return fmt.Errorf("cancelled")
-				}
-				featureBranch, baseBranch, err = resolveFeatureWorktreeConfig(defaultBranch, featureBranch, baseBranch)
-				if err != nil {
-					return err
-				}
-			}
+			createDefaultWorktree = plan.CreateDefault
+			createReviewWorktree = plan.CreateReview
+			customWorktrees = append(customWorktrees, plan.Custom...)
 		}
 	}
 
@@ -180,8 +167,7 @@ func runConvertPath(repoPath, repoDefaultBranch string) error {
 			defaultBranch,
 			createDefaultWorktree,
 			createReviewWorktree,
-			featureBranch,
-			baseBranch,
+			customWorktrees,
 		); err != nil {
 			return err
 		}
@@ -230,8 +216,7 @@ func createPlannedConvertWorktrees(
 	bareMetadataPath, repoPath, defaultBranch string,
 	createDefaultWorktree bool,
 	createReviewWorktree bool,
-	featureBranch string,
-	baseBranch string,
+	customWorktrees []ui.CloneWorktreeSpec,
 ) error {
 
 	if createDefaultWorktree {
@@ -252,7 +237,15 @@ func createPlannedConvertWorktrees(
 		fmt.Printf("✓ Worktree created: %s\n", reviewWorktreePath)
 	}
 
-	if featureBranch != "" {
+	for _, custom := range customWorktrees {
+		featureBranch := strings.TrimSpace(custom.Name)
+		if featureBranch == "" {
+			continue
+		}
+		baseBranch := strings.TrimSpace(custom.BaseBranch)
+		if baseBranch == "" {
+			baseBranch = defaultBranch
+		}
 		featureWorktreePath := filepath.Join(repoPath, featureBranch)
 		fmt.Printf("Creating custom worktree %q from %q at %s...\n", featureBranch, baseBranch, featureWorktreePath)
 		if err := gitMgr.CreateFeatureWorktree(bareMetadataPath, featureWorktreePath, featureBranch, baseBranch); err != nil {

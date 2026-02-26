@@ -18,7 +18,6 @@ var tuiCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(tuiCmd)
 }
 
 func runTUI(cmd *cobra.Command, args []string) error {
@@ -55,7 +54,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		sessions = []string{}
 	}
 
-	result, err := ui.RunHub(allRepos, localOnly, localRepos, sessions, cfg.Git.Worktree)
+	result, err := ui.RunHub(allRepos, localOnly, localRepos, sessions, false)
 	if err != nil {
 		return err
 	}

@@ -32,8 +32,6 @@ type GitHubConfig struct {
 
 type GitConfig struct {
 	CloneDir                 string `toml:"clone_dir"`
-	Worktree                 bool   `toml:"worktree"`
-	SeshOpen                 bool   `toml:"sesh_open"`
 	OpenCommand              string `toml:"open_command"`
 	ShallowPromptThresholdKB int    `toml:"shallow_prompt_threshold_kb"`
 }

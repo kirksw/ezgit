@@ -26,7 +26,6 @@ var openCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(openCmd)
 }
 
 func runOpen(cmd *cobra.Command, args []string) error {

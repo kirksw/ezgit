@@ -9,7 +9,6 @@ CLI for cloning, opening, converting, and caching GitHub repositories with workt
 - [Install](#install)
 - [Quick Start](#quick-start)
 - [Commands](#commands)
-- [Unified TUI](#unified-tui-ezgit-tui)
 - [Worktree Layout](#worktree-layout)
 - [Config](#config)
 - [Open Command Templates](#open-command-templates)
@@ -34,37 +33,28 @@ nix profile install github:kirksw/ezgit
 ## Quick Start
 
 ```bash
-ezgit clone facebook/react        # clone a repo
-ezgit clone -w facebook/react     # clone with worktree layout
-ezgit open                        # fuzzy-pick and open a local repo
-ezgit tui                         # all-in-one interactive mode
+ezgit                             # fuzzy-pick repo, ensure local, then open
+ezgit facebook/react              # ensure repo exists locally, then open
+ezgit facebook/react my-feature   # ensure named worktree exists, then open
+ezgit --no-open facebook/react    # ensure only (do not run open_command)
 ```
 
 ## Commands
 
-### `ezgit clone [owner/repo]`
+### `ezgit [owner/repo] [worktree-name]`
 
-Clone a GitHub repository. With no arguments, opens a fuzzy picker over cached repos.
+Primary command. It ensures local state, then runs `open_command` unless `--no-open` is set.
 
-Flags: `-w` worktree mode, `-b` branch, `--depth` shallow clone depth, `-q` quiet, `--key-path` SSH key, `-d` destination directory, `--feature` create an additional feature worktree, `--feature-base` base branch for `--feature`.
+- `ezgit` (no args): fuzzy picker over cached repos, then ensure+open.
+- `ezgit owner/repo`: ensure repo exists (regular clone), then open.
+- `ezgit owner/repo worktree`: ensure worktree exists (worktree layout), then open.
 
-When the destination already exists:
+Flags: `--no-open`, `-b` branch, `--depth` shallow clone depth, `-q` quiet, `--key-path` SSH key, `-d` destination directory, `--feature`, `--feature-base`.
 
-- **Regular clone target exists**: clone is skipped (treated as success).
-- **Worktree layout already present**: clone is skipped, worktree creation continues.
-- **Existing non-worktree clone with `-w`**: interactive prompt offers to open the repo, auto-convert to worktree layout, or cancel. Via the fuzzy picker this defaults to opening the repo. In non-interactive mode a clear error with guidance is returned.
+Worktree mode is now implicit:
 
-### `ezgit add <owner/repo> <worktree-name>`
-
-Add a feature worktree to an existing worktree-layout repo.
-
-### `ezgit open`
-
-Open a locally cloned repository using the configured `open_command`. Launches a fuzzy picker over local repos.
-
-### `ezgit connect [session]`
-
-Connect to a tmux session. Fuzzy-selects if session name is omitted.
+- positional worktree name is provided (`ezgit owner/repo worktree`), or
+- in interactive no-arg flow, more than one worktree is selected.
 
 ### `ezgit convert [path]`
 
@@ -72,25 +62,11 @@ Convert a local repository to bare metadata in `.git` + worktrees. Without a pat
 
 Flags: `-w` create worktree for specific branch(es), `--all-worktrees` create worktree for all branches, `--no-worktrees` skip worktree creation, `--key-path` SSH key.
 
-### `ezgit tui`
-
-Launch the unified interactive TUI (see [below](#unified-tui-ezgit-tui)).
-
 ### `ezgit cache <subcommand>`
 
 Cache operations: `refresh`, `list`, `search`, `invalidate`.
 
 Flags (on `cache`): `--force` full refresh regardless of TTL, `--ttl` custom TTL duration (e.g. `24h`).
-
-## Unified TUI (`ezgit tui`)
-
-Single searchable list page with mode switching:
-
-- `tab` / `left` / `right`: switch mode (`clone`, `open`, `connect`) and replace list contents.
-- `enter`: run selected item in current mode.
-- `ctrl+w`: toggle clone worktree mode (clone mode only).
-- `ctrl+c`: convert selected local repo (open mode only).
-- `esc` / `ctrl+c`: cancel.
 
 ## Worktree Layout
 
@@ -125,9 +101,7 @@ private = ["my-org/private-repo"]
 
 [git]
 clone_dir = "~/git/github.com"
-worktree = false
-sesh_open = false
-open_command = "sesh connect \"$repoPath\""
+open_command = "sesh connect \"$absPath\""
 shallow_prompt_threshold_kb = 204800
 ```
 
@@ -139,7 +113,7 @@ GitHub auth resolution order:
 
 ## Open Command Templates
 
-`open_command` runs through `bash -lc` and can use:
+`open_command` runs through `bash -lc` when `ezgit` opens a resolved repo/worktree path and can use:
 
 - `$org`
 - `$repo`
@@ -149,11 +123,15 @@ GitHub auth resolution order:
 - `$repoFullName`
 - `$absPath`
 
-Example:
+Examples:
 
 ```toml
 [git]
-open_command = "sesh connect \"$repoPath\""
+# sesh expects an absolute path
+open_command = "sesh connect \"$absPath\""
+
+# tmux: create or attach session named org/repo[/worktree]
+open_command = "tmux new-session -A -s \"$repoPath\" -c \"$absPath\""
 ```
 
 ## Cache Behavior
@@ -161,11 +139,11 @@ open_command = "sesh connect \"$repoPath\""
 - Cache refresh respects TTL by default and skips remote fetches while cache is fresh.
 - `--force` performs a full refresh regardless of TTL.
 - Use `ezgit cache refresh --ttl <duration>` to set a custom TTL for that refresh run.
-- `clone`, `open`, and `tui` trigger automatic cache refresh attempts before listing repos.
+- `ezgit` (no args) and picker-based flows trigger automatic cache refresh attempts before listing repos.
 
 ## Zoxide Integration
 
-`clone`, `add`, and conversion paths register repository/worktree paths with `zoxide` using `zoxide add`.
+Repository ensure/clone/convert flows register paths with `zoxide` using `zoxide add`.
 
 - Adds the repo root path.
 - Adds worktree paths (`main`, `review`, and feature worktrees when present).

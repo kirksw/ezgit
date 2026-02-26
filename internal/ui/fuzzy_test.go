@@ -270,15 +270,15 @@ func TestNewFeaturePromptModelWithoutCreateStepStartsAtBaseSelection(t *testing.
 }
 
 func TestNewCloneWorktreeOptionsModelDefaults(t *testing.T) {
-	m := newCloneWorktreeOptionsModel("main")
+	m := newCloneWorktreeOptionsModel("main", []string{"main"}, true)
 	if !m.createDefault {
 		t.Fatal("default worktree should start enabled")
 	}
 	if !m.createReview {
 		t.Fatal("review worktree should start enabled")
 	}
-	if m.addCustom {
-		t.Fatal("custom worktree should start disabled")
+	if len(m.customWorktree) != 0 {
+		t.Fatal("custom worktrees should start empty")
 	}
 }
 

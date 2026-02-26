@@ -853,36 +853,57 @@ func RunCreateWorktreePrompt(branches []string, defaultBranch string) (featureBr
 	return strings.TrimSpace(final.featureName), strings.TrimSpace(final.selectedBase), false, nil
 }
 
-type cloneWorktreeOption int
-
-const (
-	cloneWorktreeOptionDefault cloneWorktreeOption = iota
-	cloneWorktreeOptionReview
-	cloneWorktreeOptionCustom
-)
-
-type cloneWorktreeOptionsModel struct {
-	defaultBranch string
-	cursor        int
-	createDefault bool
-	createReview  bool
-	addCustom     bool
-	cancelled     bool
-	quitting      bool
+type CloneWorktreeSpec struct {
+	Name       string
+	BaseBranch string
 }
 
-func newCloneWorktreeOptionsModel(defaultBranch string) cloneWorktreeOptionsModel {
+type CloneWorktreePlan struct {
+	CreateDefault bool
+	CreateReview  bool
+	Custom        []CloneWorktreeSpec
+}
+
+type cloneWorktreeOptionsModel struct {
+	defaultBranch  string
+	branches       []string
+	cursor         int
+	createDefault  bool
+	createReview   bool
+	customWorktree []CloneWorktreeSpec
+	requestAdd     bool
+	cancelled      bool
+	quitting       bool
+}
+
+func newCloneWorktreeOptionsModel(defaultBranch string, branches []string, defaultChecked bool) cloneWorktreeOptionsModel {
 	defaultBranch = strings.TrimSpace(defaultBranch)
 	if defaultBranch == "" {
 		defaultBranch = "main"
 	}
-	return cloneWorktreeOptionsModel{
-		defaultBranch: defaultBranch,
-		createDefault: true,
-		createReview:  true,
-		addCustom:     false,
-		cursor:        0,
+	if len(branches) == 0 {
+		branches = []string{defaultBranch}
 	}
+	return cloneWorktreeOptionsModel{
+		defaultBranch:  defaultBranch,
+		branches:       branches,
+		createDefault:  defaultChecked,
+		createReview:   defaultChecked,
+		customWorktree: make([]CloneWorktreeSpec, 0),
+		cursor:         0,
+	}
+}
+
+func (m cloneWorktreeOptionsModel) optionCount() int {
+	return 2 + len(m.customWorktree) + 1
+}
+
+func (m cloneWorktreeOptionsModel) customStartIndex() int {
+	return 2
+}
+
+func (m cloneWorktreeOptionsModel) addRowIndex() int {
+	return m.optionCount() - 1
 }
 
 func (m cloneWorktreeOptionsModel) Init() tea.Cmd {
@@ -898,19 +919,34 @@ func (m cloneWorktreeOptionsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case tea.KeyUp, tea.KeyCtrlP:
-			m.cursor = (m.cursor - 1 + 3) % 3
+			m.cursor = (m.cursor - 1 + m.optionCount()) % m.optionCount()
 		case tea.KeyDown, tea.KeyCtrlN:
-			m.cursor = (m.cursor + 1) % 3
+			m.cursor = (m.cursor + 1) % m.optionCount()
 		case tea.KeySpace:
-			switch cloneWorktreeOption(m.cursor) {
-			case cloneWorktreeOptionDefault:
+			switch m.cursor {
+			case 0:
 				m.createDefault = !m.createDefault
-			case cloneWorktreeOptionReview:
+			case 1:
 				m.createReview = !m.createReview
-			case cloneWorktreeOptionCustom:
-				m.addCustom = !m.addCustom
 			}
 		case tea.KeyEnter:
+			if m.cursor == m.addRowIndex() {
+				m.requestAdd = true
+				m.quitting = true
+				return m, tea.Quit
+			}
+
+			if m.cursor >= m.customStartIndex() && m.cursor < m.addRowIndex() {
+				idx := m.cursor - m.customStartIndex()
+				if idx >= 0 && idx < len(m.customWorktree) {
+					m.customWorktree = append(m.customWorktree[:idx], m.customWorktree[idx+1:]...)
+					if m.cursor >= m.optionCount() {
+						m.cursor = m.optionCount() - 1
+					}
+				}
+				return m, nil
+			}
+
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -923,79 +959,129 @@ func (m cloneWorktreeOptionsModel) View() string {
 		return ""
 	}
 
-	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("228")).
-		Bold(true)
-	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Italic(true)
-	cursorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
-		Bold(true)
-	selectedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("120")).
-		Bold(true)
-	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
-
-	type option struct {
-		label   string
-		checked bool
-	}
-	options := []option{
-		{label: fmt.Sprintf("Default branch worktree (%s)", m.defaultBranch), checked: m.createDefault},
-		{label: fmt.Sprintf("Review worktree (from %s)", m.defaultBranch), checked: m.createReview},
-		{label: "Add custom worktree", checked: m.addCustom},
-	}
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("228")).Bold(true)
+	instructionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Italic(true)
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("120")).Bold(true)
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("Clone worktree options"))
 	b.WriteString("\n\n")
 
-	for i, opt := range options {
+	renderCheckbox := func(index int, label string, checked bool) {
 		prefix := "  "
-		if i == m.cursor {
+		if index == m.cursor {
 			prefix = cursorStyle.Render("▶ ")
 		}
-
 		box := "[ ]"
-		if opt.checked {
+		if checked {
 			box = selectedStyle.Render("[✓]")
 		}
-
 		b.WriteString(prefix)
 		b.WriteString(box)
 		b.WriteString(" ")
-		b.WriteString(normalStyle.Render(opt.label))
+		b.WriteString(normalStyle.Render(label))
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString(instructionStyle.Render("up/down: navigate | space: toggle | enter: confirm | esc: use defaults"))
+	renderCheckbox(0, fmt.Sprintf("Default branch worktree (%s)", m.defaultBranch), m.createDefault)
+	renderCheckbox(1, fmt.Sprintf("Review worktree (from %s)", m.defaultBranch), m.createReview)
+
+	for i, custom := range m.customWorktree {
+		index := m.customStartIndex() + i
+		prefix := "  "
+		if index == m.cursor {
+			prefix = cursorStyle.Render("▶ ")
+		}
+		label := fmt.Sprintf("Custom worktree: %s (from %s)", custom.Name, custom.BaseBranch)
+		b.WriteString(prefix)
+		b.WriteString(selectedStyle.Render("[✓]"))
+		b.WriteString(" ")
+		b.WriteString(normalStyle.Render(label))
+		b.WriteString("\n")
+	}
+
+	addPrefix := "  "
+	if m.cursor == m.addRowIndex() {
+		addPrefix = cursorStyle.Render("▶ ")
+	}
+	b.WriteString(addPrefix)
+	b.WriteString(normalStyle.Render("+ Add custom worktree"))
+	b.WriteString("\n\n")
+	b.WriteString(instructionStyle.Render("up/down: navigate | space: toggle default/review | enter: add/remove/confirm | esc: cancel"))
+
 	return b.String()
 }
 
+func RunCloneWorktreePlanPrompt(branches []string, defaultBranch string, defaultChecked bool) (CloneWorktreePlan, bool, error) {
+	m := newCloneWorktreeOptionsModel(defaultBranch, branches, defaultChecked)
+
+	for {
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		finalModel, err := p.Run()
+		if err != nil {
+			return CloneWorktreePlan{}, false, fmt.Errorf("failed to run clone worktree options prompt: %w", err)
+		}
+
+		final, ok := finalModel.(cloneWorktreeOptionsModel)
+		if !ok {
+			return CloneWorktreePlan{}, false, fmt.Errorf("unexpected model type")
+		}
+
+		if final.cancelled {
+			return CloneWorktreePlan{}, true, nil
+		}
+
+		if !final.requestAdd {
+			return CloneWorktreePlan{
+				CreateDefault: final.createDefault,
+				CreateReview:  final.createReview,
+				Custom:        append([]CloneWorktreeSpec(nil), final.customWorktree...),
+			}, false, nil
+		}
+
+		featureBranch, baseBranch, cancelled, err := RunCreateWorktreePrompt(final.branches, final.defaultBranch)
+		if err != nil {
+			return CloneWorktreePlan{}, false, err
+		}
+
+		final.requestAdd = false
+		final.quitting = false
+
+		if !cancelled {
+			featureBranch = strings.TrimSpace(featureBranch)
+			baseBranch = strings.TrimSpace(baseBranch)
+			if baseBranch == "" {
+				baseBranch = final.defaultBranch
+			}
+			if featureBranch != "" && !containsCloneWorktreeSpec(final.customWorktree, featureBranch) {
+				final.customWorktree = append(final.customWorktree, CloneWorktreeSpec{Name: featureBranch, BaseBranch: baseBranch})
+			}
+		}
+
+		m = final
+	}
+}
+
+func containsCloneWorktreeSpec(list []CloneWorktreeSpec, name string) bool {
+	for _, item := range list {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func RunCloneWorktreeOptionsPrompt(defaultBranch string) (createDefault bool, createReview bool, addCustom bool, cancelled bool, err error) {
-	m := newCloneWorktreeOptionsModel(defaultBranch)
-	p := tea.NewProgram(
-		m,
-		tea.WithAltScreen(),
-	)
-	finalModel, err := p.Run()
+	plan, cancelled, err := RunCloneWorktreePlanPrompt([]string{defaultBranch}, defaultBranch, true)
 	if err != nil {
-		return true, true, false, false, fmt.Errorf("failed to run clone worktree options prompt: %w", err)
+		return true, true, false, false, err
 	}
-
-	final, ok := finalModel.(cloneWorktreeOptionsModel)
-	if !ok {
-		return true, true, false, false, fmt.Errorf("unexpected model type")
-	}
-
-	if final.cancelled {
+	if cancelled {
 		return false, false, false, true, nil
 	}
-
-	return final.createDefault, final.createReview, final.addCustom, false, nil
+	return plan.CreateDefault, plan.CreateReview, len(plan.Custom) > 0, false, nil
 }
 
 // RunFuzzySearch launches the fuzzy repo picker and returns the selected repo

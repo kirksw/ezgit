@@ -22,12 +22,12 @@ private = [
 [git]
 # Default directory for cloned repositories (optional)
 clone_dir = "~/git/github.com"
-# Clone as bare repo with worktree by default (optional, default: false)
-# worktree = true
-# Command used by `ezgit open` / open mode (optional).
+# Command used when opening resolved repo/worktree paths (optional).
 # Available placeholders:
 #   $org, $repo, $worktree, $repoPath, $orgRepo, $repoFullName, $absPath
 # Example for sesh:
-# open_command = "sesh connect \"$repoPath\""
+# open_command = "sesh connect \"$absPath\""
+# Example for tmux (session name: org/repo[/worktree]):
+# open_command = "tmux new-session -A -s \"$repoPath\" -c \"$absPath\""
 # Prompt to recommend shallow clone when repo size is at/above this threshold in KB (optional, 0 disables)
 # shallow_prompt_threshold_kb = 204800

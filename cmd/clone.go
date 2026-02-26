@@ -35,6 +35,17 @@ const (
 	existingRepoActionConvert
 )
 
+type cloneCustomWorktree struct {
+	Name       string
+	BaseBranch string
+}
+
+type cloneWorktreePlan struct {
+	CreateDefault bool
+	CreateReview  bool
+	Custom        []cloneCustomWorktree
+}
+
 var cloneCmd = &cobra.Command{
 	Use:   "clone [repo] [worktreename]",
 	Short: "Clone a GitHub repository",
@@ -60,6 +71,7 @@ var (
 	featureBaseBranch  string
 	skipWorktreePrompt bool // set internally to bypass interactive worktree prompts
 	skipExistingPrompt bool // set internally to bypass existing repo action prompt
+	forcedClonePlan    *cloneWorktreePlan
 	runZoxideAdd       = func(path string) error {
 		cmd := exec.Command("zoxide", "add", path)
 		_, err := cmd.CombinedOutput()
@@ -68,17 +80,13 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(cloneCmd)
-	rootCmd.AddCommand(addCmd)
-
-	cloneCmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "clone metadata into .git and create worktree(s)")
-	cloneCmd.Flags().StringVarP(&branch, "branch", "b", "", "clone specific branch")
-	cloneCmd.Flags().IntVar(&depth, "depth", 0, "create a shallow clone with specified depth")
-	cloneCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "suppress output")
-	cloneCmd.Flags().StringVar(&keyPath, "key-path", "", "SSH key path (default: ~/.ssh/id_rsa)")
-	cloneCmd.Flags().StringVarP(&cloneDest, "dest", "d", "", "destination directory")
-	cloneCmd.Flags().StringVar(&featureWorktree, "feature", "", "create an additional feature worktree using this branch name (worktree mode)")
-	cloneCmd.Flags().StringVar(&featureBaseBranch, "feature-base", "", "base branch for --feature (defaults to repository default branch)")
+	rootCmd.Flags().StringVarP(&branch, "branch", "b", "", "clone specific branch (non-worktree clones)")
+	rootCmd.Flags().IntVar(&depth, "depth", 0, "create a shallow clone with specified depth")
+	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "suppress output")
+	rootCmd.Flags().StringVar(&keyPath, "key-path", "", "SSH key path (default: ~/.ssh/id_rsa)")
+	rootCmd.Flags().StringVarP(&cloneDest, "dest", "d", "", "destination directory")
+	rootCmd.Flags().StringVar(&featureWorktree, "feature", "", "create an additional feature worktree (worktree layout only)")
+	rootCmd.Flags().StringVar(&featureBaseBranch, "feature-base", "", "base branch for --feature (defaults to repository default branch)")
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
@@ -130,10 +138,6 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	if !cmd.Flags().Changed("worktree") {
-		worktree = cfg.Git.Worktree
-	}
-
 	if worktree && branch != "" {
 		return fmt.Errorf("--branch is not supported with --worktree; use --feature-base to control the feature worktree base branch")
 	}
@@ -143,7 +147,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(args) == 0 {
-		return runFuzzyClone(cfg, cfg.Git.SeshOpen)
+		return runFuzzyClone(cfg, true)
 	}
 
 	if len(args) == 2 {
@@ -371,6 +375,10 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 
 	if worktree {
 		branchName := resolveDefaultBranch(repoInput, defaultBranch)
+		branches := []string{branchName}
+		if listedBranches, listErr := gitMgr.ListBranches(metadataPath); listErr == nil && len(listedBranches) > 0 {
+			branches = listedBranches
+		}
 
 		if didClone {
 			// Fix remote tracking: git clone --bare does not set a fetch refspec
@@ -382,22 +390,28 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 		interactive := !skipWorktreePrompt && !quiet && isInteractiveStdin()
 		createDefaultWorktree := true
 		createReviewWorktree := true
-		requestCustomWorktree := false
+		customWorktrees := make([]cloneCustomWorktree, 0)
 
-		if interactive {
-			var cancelled bool
-			createDefaultWorktree, createReviewWorktree, requestCustomWorktree, cancelled, err = ui.RunCloneWorktreeOptionsPrompt(branchName)
-			if err != nil {
-				return fmt.Errorf("failed to configure clone worktree options: %w", err)
+		if forcedClonePlan != nil {
+			createDefaultWorktree = forcedClonePlan.CreateDefault
+			createReviewWorktree = forcedClonePlan.CreateReview
+			customWorktrees = append(customWorktrees, forcedClonePlan.Custom...)
+		} else if interactive {
+			plan, cancelled, planErr := ui.RunCloneWorktreePlanPrompt(branches, branchName, true)
+			if planErr != nil {
+				return fmt.Errorf("failed to configure clone worktree options: %w", planErr)
 			}
 			if cancelled {
 				return fmt.Errorf("cancelled")
 			}
-		}
-
-		branches := []string{branchName}
-		if listedBranches, listErr := gitMgr.ListBranches(metadataPath); listErr == nil && len(listedBranches) > 0 {
-			branches = listedBranches
+			createDefaultWorktree = plan.CreateDefault
+			createReviewWorktree = plan.CreateReview
+			for _, custom := range plan.Custom {
+				customWorktrees = append(customWorktrees, cloneCustomWorktree{
+					Name:       custom.Name,
+					BaseBranch: custom.BaseBranch,
+				})
+			}
 		}
 
 		featureBranch := ""
@@ -407,19 +421,12 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 			if err != nil {
 				return err
 			}
-		} else if interactive && requestCustomWorktree {
-			var cancelled bool
-			featureBranch, baseBranch, cancelled, err = ui.RunCreateWorktreePrompt(branches, branchName)
-			if err != nil {
-				return fmt.Errorf("failed to configure feature worktree: %w", err)
-			}
-			if cancelled {
-				return fmt.Errorf("cancelled")
-			}
-			featureBranch, baseBranch, err = resolveFeatureWorktreeConfig(branchName, featureBranch, baseBranch)
-			if err != nil {
-				return err
-			}
+		}
+		if featureBranch != "" {
+			customWorktrees = append(customWorktrees, cloneCustomWorktree{
+				Name:       featureBranch,
+				BaseBranch: baseBranch,
+			})
 		}
 
 		if createDefaultWorktree {
@@ -448,13 +455,21 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 			}
 		}
 
-		if featureBranch != "" {
-			featureWorktreePath := filepath.Join(dest, featureBranch)
-			if !quiet {
-				fmt.Printf("Creating feature worktree %q from %q\n", featureBranch, baseBranch)
+		for _, custom := range customWorktrees {
+			customName := strings.TrimSpace(custom.Name)
+			if customName == "" {
+				continue
 			}
-			if err := gitMgr.CreateFeatureWorktree(metadataPath, featureWorktreePath, featureBranch, baseBranch); err != nil {
-				return fmt.Errorf("failed to create feature worktree %s from %s: %w", featureBranch, baseBranch, err)
+			customBase := strings.TrimSpace(custom.BaseBranch)
+			if customBase == "" {
+				customBase = branchName
+			}
+			featureWorktreePath := filepath.Join(dest, customName)
+			if !quiet {
+				fmt.Printf("Creating feature worktree %q from %q\n", customName, customBase)
+			}
+			if err := gitMgr.CreateFeatureWorktree(metadataPath, featureWorktreePath, customName, customBase); err != nil {
+				return fmt.Errorf("failed to create feature worktree %s from %s: %w", customName, customBase, err)
 			}
 			if !quiet {
 				fmt.Printf("Worktree created: %s\n", featureWorktreePath)

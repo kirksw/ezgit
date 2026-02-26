@@ -106,8 +106,6 @@ private = ["my-org/secret"]
 
 [git]
 clone_dir = "~/git/github.com"
-worktree = true
-sesh_open = false
 open_command = "sesh connect \"$repoPath\""
 shallow_prompt_threshold_kb = 204800
 `
@@ -135,14 +133,6 @@ shallow_prompt_threshold_kb = 204800
 	expectedCloneDir := filepath.Join(homeDir, "git/github.com")
 	if cloneDir != expectedCloneDir {
 		t.Errorf("GetCloneDir() = %v, want %v", cloneDir, expectedCloneDir)
-	}
-
-	if !cfg.Git.Worktree {
-		t.Errorf("Git.Worktree = %v, want true", cfg.Git.Worktree)
-	}
-
-	if cfg.Git.SeshOpen {
-		t.Errorf("Git.SeshOpen = %v, want false", cfg.Git.SeshOpen)
 	}
 
 	if cfg.Git.OpenCommand != "sesh connect \"$repoPath\"" {
