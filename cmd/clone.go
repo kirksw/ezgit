@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,6 +16,23 @@ import (
 	"github.com/kirksw/ezgit/internal/ui"
 	"github.com/kirksw/ezgit/internal/utils"
 	"github.com/spf13/cobra"
+)
+
+type existingRepoState int
+
+const (
+	existingRepoMissing existingRepoState = iota
+	existingRepoRegular
+	existingRepoWorktree
+	existingRepoNonRepo
+)
+
+type existingRepoAction int
+
+const (
+	existingRepoActionCancel existingRepoAction = iota
+	existingRepoActionOpen
+	existingRepoActionConvert
 )
 
 var cloneCmd = &cobra.Command{
@@ -39,6 +59,12 @@ var (
 	featureWorktree    string
 	featureBaseBranch  string
 	skipWorktreePrompt bool // set internally to bypass interactive worktree prompts
+	skipExistingPrompt bool // set internally to bypass existing repo action prompt
+	runZoxideAdd       = func(path string) error {
+		cmd := exec.Command("zoxide", "add", path)
+		_, err := cmd.CombinedOutput()
+		return err
+	}
 )
 
 func init() {
@@ -155,9 +181,13 @@ func runFuzzyClone(cfg *config.Config, openMode bool) error {
 
 		if _, err := os.Stat(repoPath); os.IsNotExist(err) {
 			worktree = result.Worktree
+			originalSkipExistingPrompt := skipExistingPrompt
+			skipExistingPrompt = true
 			if err := runDirectClone(cfg, result.Repo.FullName, result.Repo.DefaultBranch, result.Repo.Size); err != nil {
+				skipExistingPrompt = originalSkipExistingPrompt
 				return fmt.Errorf("failed to clone repo: %w", err)
 			}
+			skipExistingPrompt = originalSkipExistingPrompt
 			localRepos[result.Repo.FullName] = true
 		}
 
@@ -172,6 +202,11 @@ func runFuzzyClone(cfg *config.Config, openMode bool) error {
 	}
 
 	worktree = result.Worktree
+	originalSkipExistingPrompt := skipExistingPrompt
+	skipExistingPrompt = true
+	defer func() {
+		skipExistingPrompt = originalSkipExistingPrompt
+	}()
 	return runDirectClone(cfg, result.Repo.FullName, result.Repo.DefaultBranch, result.Repo.Size)
 }
 
@@ -248,6 +283,66 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 	}
 
 	cloneTarget, metadataPath := resolveClonePaths(dest, worktree)
+	repoState, err := detectExistingRepoState(dest)
+	if err != nil {
+		return err
+	}
+
+	didClone := true
+	if repoState != existingRepoMissing {
+		switch repoState {
+		case existingRepoNonRepo:
+			return fmt.Errorf("destination exists but is not a git repository: %s", dest)
+		case existingRepoRegular:
+			if !worktree {
+				if !quiet {
+					fmt.Printf("Repository already exists at %s; skipping clone\n", dest)
+				}
+				registerPathsWithZoxide([]string{dest}, quiet)
+				return nil
+			}
+
+			if skipExistingPrompt {
+				repoFullName, ok := extractRepoFullName(repoInput)
+				if !ok {
+					return fmt.Errorf("cannot open existing repository automatically for input %q; use 'ezgit open'", repoInput)
+				}
+				return runOpenCommand(cfg, repoFullName, "")
+			}
+
+			action, actionErr := resolveExistingRegularRepoAction(dest)
+			if actionErr != nil {
+				return actionErr
+			}
+			switch action {
+			case existingRepoActionOpen:
+				repoFullName, ok := extractRepoFullName(repoInput)
+				if !ok {
+					return fmt.Errorf("cannot open existing repository automatically for input %q; use 'ezgit open'", repoInput)
+				}
+				return runOpenCommand(cfg, repoFullName, "")
+			case existingRepoActionConvert:
+				convertDefaultBranch := resolveDefaultBranch(repoInput, defaultBranch)
+				if err := runConvertPath(dest, convertDefaultBranch); err != nil {
+					return err
+				}
+				registerRepoAndWorktreesWithZoxide(git.New(), dest, quiet)
+				return nil
+			default:
+				return fmt.Errorf("cancelled")
+			}
+		case existingRepoWorktree:
+			if !worktree {
+				if !quiet {
+					fmt.Printf("Repository already exists at %s in worktree layout; skipping clone\n", dest)
+				}
+				registerRepoAndWorktreesWithZoxide(gitMgr, dest, quiet)
+				return nil
+			}
+			didClone = false
+		}
+	}
+
 	if worktree {
 		if err := os.MkdirAll(dest, 0755); err != nil {
 			return fmt.Errorf("failed to create destination directory: %w", err)
@@ -262,21 +357,27 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 		SSHKeyPath: sshKey,
 	}
 
-	if !quiet {
+	if !quiet && didClone {
 		fmt.Printf("Cloning %s to %s\n", repoURL, dest)
 	}
 
-	if err := gitMgr.Clone(repoURL, cloneTarget, opts); err != nil {
-		return fmt.Errorf("failed to clone repository: %w", err)
+	if didClone {
+		if err := gitMgr.Clone(repoURL, cloneTarget, opts); err != nil {
+			return fmt.Errorf("failed to clone repository: %w", err)
+		}
+	} else if !quiet {
+		fmt.Printf("Repository already exists at %s; skipping clone\n", dest)
 	}
 
 	if worktree {
 		branchName := resolveDefaultBranch(repoInput, defaultBranch)
 
-		// Fix remote tracking: git clone --bare does not set a fetch refspec
-		// and turns all remote branches into local branches.
-		if err := gitMgr.ConfigureBareRemote(metadataPath, branchName); err != nil {
-			return fmt.Errorf("failed to configure bare remote: %w", err)
+		if didClone {
+			// Fix remote tracking: git clone --bare does not set a fetch refspec
+			// and turns all remote branches into local branches.
+			if err := gitMgr.ConfigureBareRemote(metadataPath, branchName); err != nil {
+				return fmt.Errorf("failed to configure bare remote: %w", err)
+			}
 		}
 		interactive := !skipWorktreePrompt && !quiet && isInteractiveStdin()
 		createDefaultWorktree := true
@@ -365,6 +466,12 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 		fmt.Println("Clone successful!")
 	}
 
+	if worktree {
+		registerRepoAndWorktreesWithZoxide(gitMgr, dest, quiet)
+	} else {
+		registerPathsWithZoxide([]string{dest}, quiet)
+	}
+
 	return nil
 }
 
@@ -392,10 +499,40 @@ func runCloneWithWorktree(cfg *config.Config, repoInput string, worktreeName str
 
 	gitMgr := git.New()
 
-	// Check if the repo is already cloned (bare metadata exists).
-	if _, err := os.Stat(metadataPath); err == nil {
-		// Already cloned — just add the worktree.
-		return addWorktreeToRepo(gitMgr, repoInput, dest, metadataPath, worktreeName)
+	// Check if the repo is already cloned.
+	repoState, stateErr := detectExistingRepoState(dest)
+	if stateErr != nil {
+		return stateErr
+	}
+	if repoState != existingRepoMissing {
+		switch repoState {
+		case existingRepoWorktree:
+			return addWorktreeToRepo(gitMgr, repoInput, dest, metadataPath, worktreeName)
+		case existingRepoRegular:
+			action, actionErr := resolveExistingRegularRepoAction(dest)
+			if actionErr != nil {
+				return actionErr
+			}
+			switch action {
+			case existingRepoActionOpen:
+				repoFullName, ok := extractRepoFullName(repoInput)
+				if !ok {
+					return fmt.Errorf("cannot open existing repository automatically for input %q; use 'ezgit open'", repoInput)
+				}
+				return runOpenCommand(cfg, repoFullName, "")
+			case existingRepoActionConvert:
+				convertDefaultBranch := resolveDefaultBranch(repoInput, "")
+				if err := runConvertPath(dest, convertDefaultBranch); err != nil {
+					return err
+				}
+				registerRepoAndWorktreesWithZoxide(gitMgr, dest, quiet)
+				return addWorktreeToRepo(gitMgr, repoInput, dest, metadataPath, worktreeName)
+			default:
+				return fmt.Errorf("cancelled")
+			}
+		default:
+			return fmt.Errorf("destination exists but is not a git repository: %s", dest)
+		}
 	}
 
 	// Not cloned yet — perform full clone with defaults + the specified worktree, no prompts.
@@ -446,7 +583,124 @@ func addWorktreeToRepo(gitMgr git.GitManager, repoInput string, dest string, met
 	if !quiet {
 		fmt.Printf("Worktree created: %s\n", worktreePath)
 	}
+	registerPathsWithZoxide([]string{dest, worktreePath}, quiet)
 	return nil
+}
+
+func detectExistingRepoState(dest string) (existingRepoState, error) {
+	info, err := os.Stat(dest)
+	if os.IsNotExist(err) {
+		return existingRepoMissing, nil
+	}
+	if err != nil {
+		return existingRepoMissing, fmt.Errorf("failed to inspect destination %s: %w", dest, err)
+	}
+	if !info.IsDir() {
+		return existingRepoNonRepo, nil
+	}
+
+	gitMetadataPath := filepath.Join(dest, ".git")
+	if _, err := os.Stat(gitMetadataPath); err == nil {
+		isBare, bareErr := isBareGitDir(gitMetadataPath)
+		if bareErr != nil {
+			return existingRepoNonRepo, nil
+		}
+		if isBare {
+			return existingRepoWorktree, nil
+		}
+		return existingRepoRegular, nil
+	}
+
+	if _, err := os.Stat(filepath.Join(dest, "HEAD")); err == nil {
+		if _, err := os.Stat(filepath.Join(dest, "config")); err == nil {
+			isBare, bareErr := isBareGitDir(dest)
+			if bareErr == nil && isBare {
+				return existingRepoWorktree, nil
+			}
+		}
+	}
+
+	return existingRepoNonRepo, nil
+}
+
+func isBareGitDir(gitDir string) (bool, error) {
+	cmd := exec.Command("git", "--git-dir", gitDir, "rev-parse", "--is-bare-repository")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("failed to detect git dir type: %w", err)
+	}
+	value := strings.TrimSpace(string(output))
+	return value == "true", nil
+}
+
+func resolveExistingRegularRepoAction(dest string) (existingRepoAction, error) {
+	if !isInteractiveStdin() {
+		return existingRepoActionCancel, fmt.Errorf("destination %s is an existing non-worktree clone; re-run interactively to choose open or auto-convert", dest)
+	}
+
+	for {
+		fmt.Printf("Repository already exists at %s and is not in worktree layout. Choose action: [o]pen existing, [c]onvert to worktree, [x] cancel: ", dest)
+		input, err := readLineTrimmed(os.Stdin)
+		if err != nil {
+			return existingRepoActionCancel, fmt.Errorf("failed to read action: %w", err)
+		}
+		switch strings.ToLower(input) {
+		case "o", "open":
+			return existingRepoActionOpen, nil
+		case "c", "convert":
+			return existingRepoActionConvert, nil
+		case "x", "cancel":
+			return existingRepoActionCancel, nil
+		default:
+			fmt.Println("Please choose one of: o, c, x")
+		}
+	}
+}
+
+func readLineTrimmed(in io.Reader) (string, error) {
+	reader := bufio.NewReader(in)
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func registerRepoAndWorktreesWithZoxide(gitMgr git.GitManager, repoRoot string, quiet bool) {
+	paths := []string{repoRoot}
+	worktrees, err := gitMgr.ListWorktrees(repoRoot)
+	if err == nil {
+		for _, wt := range worktrees {
+			wt = strings.TrimSpace(wt)
+			if wt == "" {
+				continue
+			}
+			paths = append(paths, filepath.Join(repoRoot, wt))
+		}
+	}
+	registerPathsWithZoxide(paths, quiet)
+}
+
+func registerPathsWithZoxide(paths []string, quiet bool) {
+	seen := make(map[string]struct{})
+	for _, path := range paths {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			continue
+		}
+		absPath, err := filepath.Abs(trimmed)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[absPath]; ok {
+			continue
+		}
+		seen[absPath] = struct{}{}
+
+		if err := runZoxideAdd(absPath); err != nil && !quiet {
+			fmt.Printf("Warning: failed to add %s to zoxide: %v\n", absPath, err)
+		}
+	}
 }
 
 // resolveRepoPaths returns the repo destination directory and the bare metadata path.

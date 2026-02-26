@@ -47,6 +47,7 @@ GitHub auth resolution order:
 ## Commands
 
 - `ezgit clone [owner/repo]`: clone repos, supports worktree mode and shallow clone.
+- `ezgit add <owner/repo> <worktree-name>`: add a feature worktree to an existing worktree-layout repo.
 - `ezgit open`: open local repos using `open_command`.
 - `ezgit connect [session]`: connect to tmux session (fuzzy-select if omitted).
 - `ezgit convert [path]`: convert local repo to bare metadata in `.git` + worktrees.
@@ -59,9 +60,24 @@ Single searchable list page with mode switching:
 
 - `tab` / `left` / `right`: switch mode (`clone`, `open`, `connect`) and replace list contents.
 - `enter`: run selected item in current mode.
-- `w`: toggle clone worktree mode (clone mode only).
-- `c`: convert selected local repo (open mode only).
+- `ctrl+w`: toggle clone worktree mode (clone mode only).
+- `ctrl+c`: convert selected local repo (open mode only).
 - `esc` / `ctrl+c`: cancel.
+
+## Existing Clone Behavior
+
+When cloning into a destination that already exists:
+
+- Regular clone target already exists: clone is skipped and treated as success.
+- Worktree clone target already in worktree layout: clone is skipped and worktree creation continues.
+- Worktree clone target is a regular (non-worktree) clone: interactive prompt offers:
+  - open existing repo
+  - auto-convert to worktree layout
+  - cancel
+
+When cloning via the fuzzy picker (`ezgit clone` with no args), this case defaults to opening the existing repo so the flow stays non-blocking.
+
+In non-interactive mode, this last case returns a clear error with guidance.
 
 ## Open Command Templates
 
@@ -93,10 +109,19 @@ Worktree-mode clone/convert layout:
 <repo>/<feature>/ # optional feature worktree
 ```
 
+## Zoxide Integration
+
+`clone`, `add`, and conversion paths register repository/worktree paths with `zoxide` using `zoxide add`.
+
+- Adds the repo root path.
+- Adds worktree paths (`main`, `review`, and feature worktrees when present).
+- Best-effort only: failures do not fail the command.
+
 ## Cache Behavior
 
-- Cache refresh is incremental by default.
-- `--force` performs a full refresh.
+- Cache refresh respects TTL by default and skips remote fetches while cache is fresh.
+- `--force` performs a full refresh regardless of TTL.
+- Use `ezgit cache refresh --ttl <duration>` to set a custom TTL for that refresh run.
 - `clone`, `open`, and `tui` trigger automatic cache refresh attempts before listing repos.
 
 ## Development

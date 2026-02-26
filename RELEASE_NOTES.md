@@ -1,5 +1,14 @@
 # Release Notes
 
+## 0.0.6 - 2026-02-26
+
+Clone/worktree reliability and cache behavior fixes:
+- Fixed clone behavior when destination already exists, including interactive open-or-convert handling for existing non-worktree repos in worktree mode.
+- Added zoxide path registration for repo roots and worktrees created by clone/add/convert flows.
+- Fixed custom worktree branch selection UI to support long branch lists with visible scrolling/windowing.
+- Fixed cache TTL handling so incremental refresh skips remote fetches while cache is still fresh.
+- Updated README command and behavior docs to match current functionality.
+
 ## 0.0.5 - 2026-02-17
 
 Worktree command flow improvements:

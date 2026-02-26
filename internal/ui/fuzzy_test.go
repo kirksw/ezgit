@@ -306,3 +306,25 @@ func TestCtrlCCancelsFromWorktreePage(t *testing.T) {
 		t.Fatal("selected repo should be cleared on ctrl+c cancel")
 	}
 }
+
+func TestFeaturePromptVisibleRangeCentersSelectionWhenPossible(t *testing.T) {
+	start, end := featurePromptVisibleRange(20, 10, 6)
+	if start != 7 {
+		t.Fatalf("start=%d, want 7", start)
+	}
+	if end != 13 {
+		t.Fatalf("end=%d, want 13", end)
+	}
+}
+
+func TestFeaturePromptVisibleRangeClampsNearEdges(t *testing.T) {
+	start, end := featurePromptVisibleRange(20, 0, 6)
+	if start != 0 || end != 6 {
+		t.Fatalf("near start range=(%d,%d), want (0,6)", start, end)
+	}
+
+	start, end = featurePromptVisibleRange(20, 19, 6)
+	if start != 14 || end != 20 {
+		t.Fatalf("near end range=(%d,%d), want (14,20)", start, end)
+	}
+}

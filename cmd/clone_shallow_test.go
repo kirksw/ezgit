@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -237,5 +240,71 @@ func TestAddWorktreeToRepoRejectsEmptyName(t *testing.T) {
 	err := addWorktreeToRepo(nil, "lunarway/hubble-cli", "/tmp/repo", "/tmp/repo/.git", "   ")
 	if err == nil {
 		t.Fatal("expected error for empty worktree name")
+	}
+}
+
+func TestRegisterPathsWithZoxideDedupesAndNormalizes(t *testing.T) {
+	tempDir := t.TempDir()
+	repoPath := filepath.Join(tempDir, "repo")
+	if err := os.MkdirAll(repoPath, 0755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+
+	absRepoPath, err := filepath.Abs(repoPath)
+	if err != nil {
+		t.Fatalf("abs path: %v", err)
+	}
+
+	original := runZoxideAdd
+	defer func() { runZoxideAdd = original }()
+
+	var added []string
+	runZoxideAdd = func(path string) error {
+		added = append(added, path)
+		return nil
+	}
+
+	registerPathsWithZoxide([]string{
+		repoPath,
+		filepath.Join(repoPath, "..", "repo"),
+		"",
+		"   ",
+	}, true)
+
+	if len(added) != 1 {
+		t.Fatalf("len(added)=%d, want 1", len(added))
+	}
+	if added[0] != absRepoPath {
+		t.Fatalf("added[0]=%q, want %q", added[0], absRepoPath)
+	}
+}
+
+func TestRegisterPathsWithZoxideContinuesAfterErrors(t *testing.T) {
+	tempDir := t.TempDir()
+	first := filepath.Join(tempDir, "one")
+	second := filepath.Join(tempDir, "two")
+	if err := os.MkdirAll(first, 0755); err != nil {
+		t.Fatalf("mkdir first: %v", err)
+	}
+	if err := os.MkdirAll(second, 0755); err != nil {
+		t.Fatalf("mkdir second: %v", err)
+	}
+
+	original := runZoxideAdd
+	defer func() { runZoxideAdd = original }()
+
+	var calls int
+	runZoxideAdd = func(path string) error {
+		calls++
+		if calls == 1 {
+			return fmt.Errorf("boom")
+		}
+		return nil
+	}
+
+	registerPathsWithZoxide([]string{first, second}, true)
+
+	if calls != 2 {
+		t.Fatalf("calls=%d, want 2", calls)
 	}
 }

@@ -129,6 +129,11 @@ func refreshReposIncrementally(
 		return len(repos), len(repos), nil
 	}
 
+	// Respect TTL: when cache is fresh, skip remote fetches entirely.
+	if cached, err := c.Get(cacheKey); err == nil {
+		return 0, len(cached.Repos), nil
+	}
+
 	latestCreatedAt, err := c.GetLatestRepoCreatedAt(cacheKey)
 	if err != nil {
 		repos, err := fetchAll()

@@ -512,6 +512,8 @@ type featurePromptModel struct {
 	optionIndex    int
 	baseBranches   []string
 	baseIndex      int
+	width          int
+	height         int
 	defaultBranch  string
 	createFeature  bool
 	selectedBase   string
@@ -589,6 +591,8 @@ func newFeaturePromptModel(branches []string, defaultBranch string, askCreate bo
 		optionIndex:   0,
 		baseBranches:  baseBranches,
 		baseIndex:     defaultIndex,
+		width:         80,
+		height:        20,
 		defaultBranch: defaultBranch,
 		createFeature: createFeature,
 		selectedBase:  baseBranches[defaultIndex],
@@ -602,6 +606,14 @@ func (m featurePromptModel) Init() tea.Cmd {
 
 func (m featurePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		if msg.Width > 4 {
+			m.featureInput.Width = msg.Width - 4
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
@@ -710,7 +722,13 @@ func (m featurePromptModel) View() string {
 	case featurePromptStepBase:
 		b.WriteString(headerStyle.Render("Select base branch for feature worktree"))
 		b.WriteString("\n\n")
-		for i, branch := range m.baseBranches {
+		start, end := featurePromptVisibleRange(len(m.baseBranches), m.baseIndex, m.baseListHeight())
+		if start > 0 {
+			b.WriteString(instructionStyle.Render(fmt.Sprintf("  ... %d above", start)))
+			b.WriteString("\n")
+		}
+		for i := start; i < end; i++ {
+			branch := m.baseBranches[i]
 			prefix := "  "
 			if i == m.baseIndex {
 				prefix = cursorStyle.Render("▶ ")
@@ -721,6 +739,10 @@ func (m featurePromptModel) View() string {
 			}
 			b.WriteString(prefix)
 			b.WriteString(label)
+			b.WriteString("\n")
+		}
+		if end < len(m.baseBranches) {
+			b.WriteString(instructionStyle.Render(fmt.Sprintf("  ... %d below", len(m.baseBranches)-end)))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
@@ -742,6 +764,49 @@ func (m featurePromptModel) View() string {
 	}
 
 	return b.String()
+}
+
+func (m featurePromptModel) baseListHeight() int {
+	if len(m.baseBranches) == 0 {
+		return 1
+	}
+	listHeight := m.height - 10
+	if listHeight < 4 {
+		listHeight = 4
+	}
+	if listHeight > len(m.baseBranches) {
+		listHeight = len(m.baseBranches)
+	}
+	return listHeight
+}
+
+func featurePromptVisibleRange(total int, selected int, visible int) (start int, end int) {
+	if total <= 0 {
+		return 0, 0
+	}
+	if visible <= 0 || visible >= total {
+		return 0, total
+	}
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= total {
+		selected = total - 1
+	}
+
+	start = selected - (visible / 2)
+	if start < 0 {
+		start = 0
+	}
+	end = start + visible
+	if end > total {
+		end = total
+		start = end - visible
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start, end
 }
 
 func runFeatureWorktreePromptModel(m featurePromptModel) (featurePromptModel, error) {
