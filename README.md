@@ -139,11 +139,10 @@ Enable local git hooks (recommended):
 
 ## Versioning
 
-- `internal/version/VERSION` stays on a development value (for example `0.0.0-dev`) on normal branch work.
-- `ezgit version` reads that value for local/dev builds.
-- Releases are triggered by pushing a semantic-version tag (for example `v0.0.7`).
-- Release builds inject the tag version into binaries at link time.
-- GitHub release body is sourced from the matching `RELEASE_NOTES.md` section (`## <version> - <date>`), and the workflow fails if the section is missing.
+- Canonical version source: `internal/version/VERSION`.
+- `ezgit version` reads from that file at build time.
+- Pull requests to `main` fail if code changes are made without a version bump and release note update.
+- Tagged releases fail if the tag (for example `v0.0.3`) does not match `internal/version/VERSION`.
 
 ## License
 
