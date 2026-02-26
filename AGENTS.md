@@ -164,6 +164,28 @@ return fmt.Errorf("failed to load config: %w", err)
 - Current project skill:
   - `.agents/skills/release-skill/SKILL.md`
 
+## Agent Workflow
+- Default execution flow:
+  1) user request
+  2) clarifications/research
+  3) plan
+  4) build
+  5) review
+  6) document
+  7) prompt user
+  8) push (and optionally release)
+- Ask for confirmation only before push/release, not before commit.
+- Use clarifying questions only when ambiguity materially changes implementation.
+- In review step, run at least relevant targeted tests; run `go test ./...` for broad-impact changes.
+- In document step, loop by intent:
+  - Non-release commit: update docs that changed behavior (`README.md`, `AGENTS.md`, skills) and stop.
+  - Release-intended commit: update `RELEASE_NOTES.md` section `## <version> - <date>`, verify release workflow assumptions, then proceed.
+
+### Change Tracking for Release Summaries
+- Use commit prefixes consistently: `feat:`, `fix:`, `refactor:`, `perf:`, `docs:`, `ci:`, `chore:`.
+- For release-intended work, draft summary from commits since last tag (`<last-tag>..HEAD`) and curate into `RELEASE_NOTES.md`.
+- Keep `internal/version/VERSION` as dev (`*-dev*`) during this process.
+
 ## Cursor / Copilot Rules Status
 At the time this file was created, these files were not present:
 - `.cursor/rules/`
