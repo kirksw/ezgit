@@ -1,5 +1,8 @@
 # ezgit
 
+[![CI](https://github.com/kirksw/ezgit/actions/workflows/ci.yml/badge.svg)](https://github.com/kirksw/ezgit/actions/workflows/ci.yml)
+[![Dev Version Guard](https://github.com/kirksw/ezgit/actions/workflows/version-guard.yml/badge.svg)](https://github.com/kirksw/ezgit/actions/workflows/version-guard.yml)
+
 CLI for cloning, opening, converting, and caching GitHub repositories with worktree-focused workflows.
 
 ## Install
