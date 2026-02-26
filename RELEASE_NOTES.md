@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.0.9 - 2026-02-26
+
+Release version injection fix:
+- Updated version resolution so link-time injected values (`-ldflags -X .../internal/version.Value=<version>`) take precedence over embedded `internal/version/VERSION`.
+- Added regression tests for injected-vs-embedded version selection.
+
 ## 0.0.8 - 2026-02-26
 
 Packaging/version output fix:
