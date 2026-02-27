@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kirksw/ezgit/internal/github"
@@ -26,6 +27,17 @@ type CacheMetadata struct {
 	TTL                 time.Duration `json:"ttl"`
 	LatestRepoCreatedAt time.Time     `json:"latest_repo_created_at"`
 }
+
+type allReposSnapshot struct {
+	repos     []github.Repo
+	signature string
+	expiresAt time.Time
+}
+
+var (
+	allReposSnapshotMu sync.RWMutex
+	allReposSnapshots  = make(map[string]allReposSnapshot)
+)
 
 func New() *OrgCache {
 	homeDir, _ := os.UserHomeDir()
@@ -97,6 +109,8 @@ func (c *OrgCache) Set(org string, repos []github.Repo) error {
 		return fmt.Errorf("failed to write metadata: %w", err)
 	}
 
+	c.invalidateAllReposSnapshot()
+
 	return nil
 }
 
@@ -118,12 +132,9 @@ func (c *OrgCache) GetStale(org string) (*github.CachedOrg, error) {
 }
 
 func (c *OrgCache) GetLatestRepoCreatedAt(org string) (time.Time, error) {
-	data, err := os.ReadFile(c.metadataPath(org))
-	if err == nil {
-		var metadata CacheMetadata
-		if err := json.Unmarshal(data, &metadata); err == nil && !metadata.LatestRepoCreatedAt.IsZero() {
-			return metadata.LatestRepoCreatedAt, nil
-		}
+	metadata, err := c.readMetadata(org)
+	if err == nil && !metadata.LatestRepoCreatedAt.IsZero() {
+		return metadata.LatestRepoCreatedAt, nil
 	}
 
 	cached, err := c.GetStale(org)
@@ -151,6 +162,8 @@ func (c *OrgCache) Invalidate(org string) error {
 	if err := os.Remove(c.metadataPath(org)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete metadata: %w", err)
 	}
+
+	c.invalidateAllReposSnapshot()
 
 	return nil
 }
@@ -215,8 +228,19 @@ func (c *OrgCache) ListAll() ([]string, error) {
 }
 
 func (c *OrgCache) GetAllRepos() ([]github.Repo, error) {
+	now := time.Now()
+	signature, err := c.cacheSignature()
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect cache dir: %w", err)
+	}
+
+	if cached, ok := c.getCachedAllRepos(signature, now); ok {
+		return cached, nil
+	}
+
 	var allRepos []github.Repo
 	seen := make(map[string]struct{})
+	earliestExpiry := time.Time{}
 
 	orgs, err := c.ListAll()
 	if err != nil {
@@ -224,10 +248,24 @@ func (c *OrgCache) GetAllRepos() ([]github.Repo, error) {
 	}
 
 	for _, org := range orgs {
-		cached, err := c.Get(org)
+		metadata, err := c.readMetadata(org)
 		if err != nil {
 			continue
 		}
+
+		expiresAt := metadata.LastRefreshed.Add(metadata.TTL)
+		if !expiresAt.After(now) {
+			continue
+		}
+		if earliestExpiry.IsZero() || expiresAt.Before(earliestExpiry) {
+			earliestExpiry = expiresAt
+		}
+
+		cached, err := c.GetStale(org)
+		if err != nil {
+			continue
+		}
+
 		for _, repo := range cached.Repos {
 			if _, ok := seen[repo.FullName]; ok {
 				continue
@@ -237,22 +275,101 @@ func (c *OrgCache) GetAllRepos() ([]github.Repo, error) {
 		}
 	}
 
+	c.storeCachedAllRepos(signature, earliestExpiry, allRepos)
+
 	return allRepos, nil
 }
 
 func (c *OrgCache) IsExpired(org string) bool {
-	metaPath := c.metadataPath(org)
-	data, err := os.ReadFile(metaPath)
+	metadata, err := c.readMetadata(org)
 	if err != nil {
 		return true
+	}
+	if metadata.LastRefreshed.IsZero() {
+		return true
+	}
+
+	return !time.Now().Before(metadata.LastRefreshed.Add(metadata.TTL))
+}
+
+func (c *OrgCache) readMetadata(org string) (CacheMetadata, error) {
+	data, err := os.ReadFile(c.metadataPath(org))
+	if err != nil {
+		return CacheMetadata{}, err
 	}
 
 	var metadata CacheMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
-		return true
+		return CacheMetadata{}, err
 	}
 
-	return time.Since(metadata.LastRefreshed) > metadata.TTL
+	if metadata.TTL <= 0 {
+		metadata.TTL = DefaultTTL
+	}
+
+	return metadata, nil
+}
+
+func (c *OrgCache) cacheSignature() (string, error) {
+	entries, err := os.ReadDir(c.cacheDir)
+	if err != nil {
+		return "", err
+	}
+
+	parts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, fmt.Sprintf("%s:%d:%d", entry.Name(), info.Size(), info.ModTime().UnixNano()))
+	}
+
+	sort.Strings(parts)
+	return strings.Join(parts, "|"), nil
+}
+
+func (c *OrgCache) getCachedAllRepos(signature string, now time.Time) ([]github.Repo, bool) {
+	allReposSnapshotMu.RLock()
+	snapshot, ok := allReposSnapshots[c.cacheDir]
+	allReposSnapshotMu.RUnlock()
+	if !ok || snapshot.signature != signature {
+		return nil, false
+	}
+	if !snapshot.expiresAt.IsZero() && !now.Before(snapshot.expiresAt) {
+		return nil, false
+	}
+
+	return cloneRepos(snapshot.repos), true
+}
+
+func (c *OrgCache) storeCachedAllRepos(signature string, expiresAt time.Time, repos []github.Repo) {
+	allReposSnapshotMu.Lock()
+	allReposSnapshots[c.cacheDir] = allReposSnapshot{
+		repos:     cloneRepos(repos),
+		signature: signature,
+		expiresAt: expiresAt,
+	}
+	allReposSnapshotMu.Unlock()
+}
+
+func (c *OrgCache) invalidateAllReposSnapshot() {
+	allReposSnapshotMu.Lock()
+	delete(allReposSnapshots, c.cacheDir)
+	allReposSnapshotMu.Unlock()
+}
+
+func cloneRepos(repos []github.Repo) []github.Repo {
+	if len(repos) == 0 {
+		return nil
+	}
+
+	cloned := make([]github.Repo, len(repos))
+	copy(cloned, repos)
+	return cloned
 }
 
 func (c *OrgCache) orgPath(org string) string {

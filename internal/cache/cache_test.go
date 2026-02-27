@@ -186,3 +186,59 @@ func TestGetAllReposSkipsExpiredOrgCaches(t *testing.T) {
 		t.Fatalf("allRepos[0].FullName = %q, want %q", allRepos[0].FullName, "fresh/repo")
 	}
 }
+
+func TestGetAllReposRefreshesSnapshotAfterSet(t *testing.T) {
+	c := newTestCache(t)
+	c.SetTTL(time.Hour)
+
+	if err := c.Set("acme", []github.Repo{{FullName: "acme/one", CreatedAt: time.Now()}}); err != nil {
+		t.Fatalf("Set(acme) error = %v", err)
+	}
+
+	first, err := c.GetAllRepos()
+	if err != nil {
+		t.Fatalf("GetAllRepos() first error = %v", err)
+	}
+	if len(first) != 1 || first[0].FullName != "acme/one" {
+		t.Fatalf("first repos = %+v, want [acme/one]", first)
+	}
+
+	if err := c.Set("acme", []github.Repo{{FullName: "acme/two", CreatedAt: time.Now()}}); err != nil {
+		t.Fatalf("Set(acme second) error = %v", err)
+	}
+
+	second, err := c.GetAllRepos()
+	if err != nil {
+		t.Fatalf("GetAllRepos() second error = %v", err)
+	}
+	if len(second) != 1 || second[0].FullName != "acme/two" {
+		t.Fatalf("second repos = %+v, want [acme/two]", second)
+	}
+}
+
+func TestGetAllReposCachedSnapshotHonorsExpiry(t *testing.T) {
+	c := newTestCache(t)
+	c.SetTTL(5 * time.Millisecond)
+
+	if err := c.Set("acme", []github.Repo{{FullName: "acme/one", CreatedAt: time.Now()}}); err != nil {
+		t.Fatalf("Set(acme) error = %v", err)
+	}
+
+	first, err := c.GetAllRepos()
+	if err != nil {
+		t.Fatalf("GetAllRepos() first error = %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("len(first) = %d, want 1", len(first))
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	second, err := c.GetAllRepos()
+	if err != nil {
+		t.Fatalf("GetAllRepos() second error = %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("len(second) = %d, want 0", len(second))
+	}
+}

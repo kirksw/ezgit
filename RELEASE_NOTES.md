@@ -1,5 +1,14 @@
 # Release Notes
 
+## 0.0.12 - 2026-02-27
+
+Warm-path performance and open-flow improvements:
+- Reduced interactive open latency by removing redundant worktree checks and switching open-command shell execution from `bash -lc` to `bash -c`.
+- Added in-memory `GetAllRepos` snapshot caching with file-signature validation and TTL-aware expiry, dramatically reducing repeated cache deserialization and allocations.
+- Wired lazy worktree loading into `ezgit open` picker so worktrees resolve on demand for selected local repos.
+- Pre-seeded default-branch lookup from already loaded repositories in fuzzy/open/root flows to avoid extra cache scans.
+- Added regression coverage for cache snapshot invalidation/expiry, open worktree loader behavior, and default-branch lookup seeding.
+
 ## 0.0.11 - 2026-02-27
 
 Startup performance and responsiveness improvements:

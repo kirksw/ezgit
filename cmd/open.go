@@ -71,6 +71,8 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no cached repositories found. Run 'ezgit cache refresh' to fetch repos")
 	}
 
+	seedDefaultBranchLookupFromRepos(allRepos)
+
 	localRepos := utils.BuildLocalRepoMap(cloneDir, allRepos)
 
 	var localOnly []github.Repo
@@ -84,12 +86,34 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no locally cloned repositories found in %s", cloneDir)
 	}
 
-	result, err := ui.RunOpenFuzzySearch(localOnly, localRepos)
+	worktreeLoader := buildOpenWorktreeLoader(cfg, localRepos, git.New())
+
+	result, err := ui.RunOpenFuzzySearchWithOpenedAndLoader(localOnly, localRepos, nil, nil, nil, worktreeLoader)
 	if err != nil {
 		return fmt.Errorf("cancelled: %w", err)
 	}
 
 	return runOpenRepoSelection(cfg, result.Repo, localOnly, localRepos, result.SelectedWorktree)
+}
+
+func buildOpenWorktreeLoader(cfg *config.Config, localRepos map[string]bool, lister repoWorktreeLister) ui.RepoWorktreeLoader {
+	if cfg == nil || lister == nil {
+		return nil
+	}
+
+	return func(repo github.Repo) ([]string, error) {
+		repoFullName := strings.TrimSpace(repo.FullName)
+		if repoFullName == "" || !localRepos[repoFullName] {
+			return nil, nil
+		}
+
+		repoPath := getRepoPath(cfg, repoFullName, false, repo.DefaultBranch)
+		if strings.TrimSpace(repoPath) == "" {
+			return nil, nil
+		}
+
+		return lister.ListWorktrees(repoPath)
+	}
 }
 
 func runOpenDirect(repoInput string, worktreeName string) error {

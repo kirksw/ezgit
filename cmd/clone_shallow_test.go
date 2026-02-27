@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kirksw/ezgit/internal/config"
+	"github.com/kirksw/ezgit/internal/github"
 )
 
 func TestExtractRepoFullName(t *testing.T) {
@@ -170,6 +171,32 @@ func TestResolveDefaultBranchLoadsRepoDefaultsOncePerHome(t *testing.T) {
 	fallback := resolveDefaultBranch("missing/repo", "")
 	if fallback != "main" {
 		t.Fatalf("resolveDefaultBranch() fallback = %q, want %q", fallback, "main")
+	}
+}
+
+func TestSeedDefaultBranchLookupFromReposPreventsCacheReload(t *testing.T) {
+	originalLoader := loadRepoDefaultBranches
+	defer func() {
+		loadRepoDefaultBranches = originalLoader
+		resetDefaultBranchLookupCache()
+	}()
+
+	resetDefaultBranchLookupCache()
+	lookupCalls := 0
+	loadRepoDefaultBranches = func() map[string]string {
+		lookupCalls++
+		return map[string]string{"acme/repo": "main"}
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	seedDefaultBranchLookupFromRepos([]github.Repo{{FullName: "acme/repo", DefaultBranch: "trunk"}})
+
+	got := resolveDefaultBranch("acme/repo", "")
+	if got != "trunk" {
+		t.Fatalf("resolveDefaultBranch() = %q, want %q", got, "trunk")
+	}
+	if lookupCalls != 0 {
+		t.Fatalf("lookupCalls = %d, want 0", lookupCalls)
 	}
 }
 

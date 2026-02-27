@@ -90,6 +90,8 @@ func runRootFuzzy(cfg *config.Config) error {
 		return fmt.Errorf("no cached repositories found. Run 'ezgit cache refresh' to fetch repos")
 	}
 
+	seedDefaultBranchLookupFromRepos(allRepos)
+
 	var (
 		localRepos      map[string]bool
 		openedRepos     map[string]bool

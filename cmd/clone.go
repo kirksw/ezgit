@@ -192,6 +192,8 @@ func runFuzzyClone(cfg *config.Config, openMode bool) error {
 		return fmt.Errorf("no cached repositories found. Run 'ezgit cache refresh' to fetch repos")
 	}
 
+	seedDefaultBranchLookupFromRepos(allRepos)
+
 	localRepos := utils.BuildLocalRepoMap(cfg.GetCloneDir(), allRepos)
 
 	result, err := ui.RunFuzzySearch(allRepos, worktree, localRepos, openMode)
@@ -263,6 +265,43 @@ func resolveDefaultBranch(repoInput, explicit string) string {
 		return branchName
 	}
 	return "main"
+}
+
+func seedDefaultBranchLookupFromRepos(repos []github.Repo) {
+	if len(repos) == 0 {
+		return
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	if strings.TrimSpace(homeDir) == "" {
+		return
+	}
+
+	seeded := make(map[string]string, len(repos))
+	for _, repo := range repos {
+		repoFullName := strings.TrimSpace(repo.FullName)
+		branchName := strings.TrimSpace(repo.DefaultBranch)
+		if repoFullName == "" || branchName == "" {
+			continue
+		}
+		seeded[repoFullName] = branchName
+	}
+
+	if len(seeded) == 0 {
+		return
+	}
+
+	defaultBranchLookupMu.Lock()
+	defer defaultBranchLookupMu.Unlock()
+
+	if defaultBranchLookupRepos == nil || defaultBranchLookupHome != homeDir {
+		defaultBranchLookupRepos = make(map[string]string, len(seeded))
+		defaultBranchLookupHome = homeDir
+	}
+
+	for repoFullName, branchName := range seeded {
+		defaultBranchLookupRepos[repoFullName] = branchName
+	}
 }
 
 func loadRepoDefaultBranchesFromCache() map[string]string {
