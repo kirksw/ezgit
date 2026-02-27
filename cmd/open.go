@@ -173,17 +173,12 @@ func selectOrCreateWorktreeForOpen(
 		return selectedWorktree, false, nil
 	}
 
-	hasWorktrees, err := gitMgr.HasWorktrees(repoPath)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to check for worktrees: %w", err)
-	}
-	if !hasWorktrees {
-		return "", false, nil
-	}
-
 	worktrees, err := gitMgr.ListWorktrees(repoPath)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to list worktrees: %w", err)
+	}
+	if len(worktrees) == 0 {
+		return "", false, nil
 	}
 	selectionOptions := withCreateWorktreeOption(worktrees)
 	for {

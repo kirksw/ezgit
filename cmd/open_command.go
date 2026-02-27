@@ -71,7 +71,7 @@ func runOpenCommand(cfg *config.Config, repoFullName string, selectedWorktree st
 	}
 
 	command := resolveOpenCommandTemplate(cfg)
-	cmd := exec.Command("bash", "-lc", command)
+	cmd := exec.Command("bash", "-c", command)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("org=%s", ctx.Org),
 		fmt.Sprintf("repo=%s", ctx.Repo),

@@ -74,6 +74,14 @@ type repoItem struct {
 	IsOpen  bool
 }
 
+type searchableRepo struct {
+	repo             github.Repo
+	owner            string
+	nameLower        string
+	fullNameLower    string
+	descriptionLower string
+}
+
 func (i repoItem) FilterValue() string {
 	return fmt.Sprintf("%s %s %s", i.Name, i.FullName, i.Description)
 }
@@ -99,7 +107,7 @@ const (
 )
 
 type model struct {
-	repos              []github.Repo
+	searchableRepos    []searchableRepo
 	repoList           list.Model
 	textinput          textinput.Model
 	quitting           bool
@@ -133,6 +141,26 @@ type model struct {
 	allowSettingsPage  bool
 }
 
+func buildSearchableRepos(repos []github.Repo) []searchableRepo {
+	searchable := make([]searchableRepo, 0, len(repos))
+	for _, repo := range repos {
+		owner := ""
+		if parts := strings.Split(repo.FullName, "/"); len(parts) == 2 {
+			owner = parts[0]
+		}
+
+		searchable = append(searchable, searchableRepo{
+			repo:             repo,
+			owner:            owner,
+			nameLower:        strings.ToLower(repo.Name),
+			fullNameLower:    strings.ToLower(repo.FullName),
+			descriptionLower: strings.ToLower(repo.Description),
+		})
+	}
+
+	return searchable
+}
+
 func newModel(repos []github.Repo, worktree bool, localRepos map[string]bool, openMode bool) model {
 	return newModelWithControls(repos, worktree, localRepos, openMode, true, true)
 }
@@ -160,7 +188,7 @@ func newModelWithControls(
 	l.SetHeight(12)
 
 	m := model{
-		repos:             repos,
+		searchableRepos:   buildSearchableRepos(repos),
 		textinput:         ti,
 		repoList:          l,
 		worktree:          worktree,
@@ -853,7 +881,8 @@ func (m model) renderWorktreesPage() string {
 func (m model) filterRepos(query string) []list.Item {
 	query = strings.ToLower(query)
 	var items []list.Item
-	for _, repo := range m.repos {
+	for _, searchable := range m.searchableRepos {
+		repo := searchable.repo
 		switch m.filterIndex {
 		case 1:
 			if !m.localRepos[repo.FullName] {
@@ -868,19 +897,15 @@ func (m model) filterRepos(query string) []list.Item {
 			continue
 		}
 		if query != "" {
-			if !strings.Contains(strings.ToLower(repo.Name), query) &&
-				!strings.Contains(strings.ToLower(repo.FullName), query) &&
-				!strings.Contains(strings.ToLower(repo.Description), query) {
+			if !strings.Contains(searchable.nameLower, query) &&
+				!strings.Contains(searchable.fullNameLower, query) &&
+				!strings.Contains(searchable.descriptionLower, query) {
 				continue
 			}
 		}
-		owner := ""
-		if parts := strings.Split(repo.FullName, "/"); len(parts) == 2 {
-			owner = parts[0]
-		}
 		items = append(items, repoItem{
 			Repo:    repo,
-			Owner:   owner,
+			Owner:   searchable.owner,
 			IsLocal: m.localRepos[repo.FullName],
 			IsOpen:  m.openedRepos[repo.FullName],
 		})
