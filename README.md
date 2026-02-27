@@ -148,7 +148,7 @@ open_command = "tmux new-session -A -s \"$repoPath\" -c \"$absPath\""
 - Cache refresh respects TTL by default and skips remote fetches while cache is fresh.
 - `--force` performs a full refresh regardless of TTL.
 - Use `ezgit cache refresh --ttl <duration>` to set a custom TTL for that refresh run.
-- `ezgit` (no args) and picker-based flows trigger automatic cache refresh attempts before listing repos.
+- `ezgit` (no args) and picker-based flows use cached repos immediately when available and refresh stale caches in the background.
 
 ## Zoxide Integration
 
@@ -163,6 +163,12 @@ Repository ensure/clone/convert flows register paths with `zoxide` using `zoxide
 ```bash
 go test ./...
 nix run .# -- --help
+```
+
+Measure startup-related performance:
+
+```bash
+./scripts/measure-startup.sh
 ```
 
 Enable local git hooks (recommended):

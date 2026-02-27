@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.0.11 - 2026-02-27
+
+Startup performance and responsiveness improvements:
+- Reduced no-arg startup latency by loading cached repositories immediately and running stale cache refresh in the background for picker-based flows.
+- Added lazy worktree loading in the open picker so worktrees are resolved on demand for selected local repositories instead of eagerly scanning all local repos.
+- Parallelized and streamlined startup prep (local repo detection, tmux/opened-state mapping, cache-refresh targets) and removed redundant default-branch/cache lookups.
+- Added startup benchmark coverage and helper scripts to measure key hot paths (`fuzzy` prep, worktree discovery, cache deserialization, local repo detection), plus expanded regression tests for cache/default-branch/worktree-loading behavior.
+
 ## 0.0.10 - 2026-02-26
 
 Picker and worktree UX refinements:

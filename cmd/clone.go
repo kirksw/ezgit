@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/kirksw/ezgit/internal/cache"
 	"github.com/kirksw/ezgit/internal/config"
@@ -61,22 +62,29 @@ var addCmd = &cobra.Command{
 }
 
 var (
-	worktree           bool
-	branch             string
-	depth              int
-	quiet              bool
-	keyPath            string
-	cloneDest          string
-	featureWorktree    string
-	featureBaseBranch  string
-	skipWorktreePrompt bool // set internally to bypass interactive worktree prompts
-	skipExistingPrompt bool // set internally to bypass existing repo action prompt
-	forcedClonePlan    *cloneWorktreePlan
-	runZoxideAdd       = func(path string) error {
+	worktree                bool
+	branch                  string
+	depth                   int
+	quiet                   bool
+	keyPath                 string
+	cloneDest               string
+	featureWorktree         string
+	featureBaseBranch       string
+	skipWorktreePrompt      bool // set internally to bypass interactive worktree prompts
+	skipExistingPrompt      bool // set internally to bypass existing repo action prompt
+	forcedClonePlan         *cloneWorktreePlan
+	loadRepoDefaultBranches = loadRepoDefaultBranchesFromCache
+	runZoxideAdd            = func(path string) error {
 		cmd := exec.Command("zoxide", "add", path)
 		_, err := cmd.CombinedOutput()
 		return err
 	}
+)
+
+var (
+	defaultBranchLookupMu    sync.RWMutex
+	defaultBranchLookupHome  string
+	defaultBranchLookupRepos map[string]string
 )
 
 func init() {
@@ -160,13 +168,24 @@ func runClone(cmd *cobra.Command, args []string) error {
 
 func runFuzzyClone(cfg *config.Config, openMode bool) error {
 	c := cache.New()
-	if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
-		fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
-	}
-
 	allRepos, err := c.GetAllRepos()
 	if err != nil {
 		return fmt.Errorf("failed to load cached repos: %w", err)
+	}
+
+	var backgroundRefreshDone <-chan error
+	if len(allRepos) == 0 {
+		if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
+			fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
+		}
+
+		allRepos, err = c.GetAllRepos()
+		if err != nil {
+			return fmt.Errorf("failed to load cached repos: %w", err)
+		}
+	} else {
+		backgroundRefreshDone = startAutoRefreshConfiguredCaches(cfg, c)
+		defer warnIfBackgroundAutoRefreshFailed(backgroundRefreshDone)
 	}
 
 	if len(allRepos) == 0 {
@@ -218,17 +237,58 @@ func resolveDefaultBranch(repoInput, explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
-	// Try to find the repo in cache to get its default branch.
-	c := cache.New()
-	allRepos, err := c.GetAllRepos()
-	if err == nil {
-		for _, r := range allRepos {
-			if r.FullName == repoInput {
-				return r.DefaultBranch
-			}
+
+	homeDir, _ := os.UserHomeDir()
+
+	defaultBranchLookupMu.RLock()
+	if defaultBranchLookupRepos != nil && defaultBranchLookupHome == homeDir {
+		if branchName := strings.TrimSpace(defaultBranchLookupRepos[repoInput]); branchName != "" {
+			defaultBranchLookupMu.RUnlock()
+			return branchName
 		}
+		defaultBranchLookupMu.RUnlock()
+		return "main"
+	}
+	defaultBranchLookupMu.RUnlock()
+
+	defaultBranchLookupMu.Lock()
+	if defaultBranchLookupRepos == nil || defaultBranchLookupHome != homeDir {
+		defaultBranchLookupRepos = loadRepoDefaultBranches()
+		defaultBranchLookupHome = homeDir
+	}
+	branchName := strings.TrimSpace(defaultBranchLookupRepos[repoInput])
+	defaultBranchLookupMu.Unlock()
+
+	if branchName != "" {
+		return branchName
 	}
 	return "main"
+}
+
+func loadRepoDefaultBranchesFromCache() map[string]string {
+	defaultBranches := make(map[string]string)
+	c := cache.New()
+	allRepos, err := c.GetAllRepos()
+	if err != nil {
+		return defaultBranches
+	}
+
+	for _, repo := range allRepos {
+		branchName := strings.TrimSpace(repo.DefaultBranch)
+		if branchName == "" {
+			continue
+		}
+		defaultBranches[repo.FullName] = branchName
+	}
+
+	return defaultBranches
+}
+
+func resetDefaultBranchLookupCache() {
+	defaultBranchLookupMu.Lock()
+	defer defaultBranchLookupMu.Unlock()
+	defaultBranchLookupHome = ""
+	defaultBranchLookupRepos = nil
 }
 
 func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, repoSizeHintKB int) error {

@@ -71,3 +71,118 @@ func TestGetLatestRepoCreatedAtFallsBackWhenMetadataMissing(t *testing.T) {
 		t.Fatalf("latest = %s, want %s", latest, created)
 	}
 }
+
+func TestGetReturnsCachedOrgWhenFresh(t *testing.T) {
+	c := newTestCache(t)
+	c.SetTTL(time.Hour)
+
+	repos := []github.Repo{{FullName: "acme/repo", CreatedAt: time.Now()}}
+	if err := c.Set("acme", repos); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	cached, err := c.Get("acme")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(cached.Repos) != 1 {
+		t.Fatalf("len(cached.Repos) = %d, want 1", len(cached.Repos))
+	}
+	if cached.Repos[0].FullName != "acme/repo" {
+		t.Fatalf("cached.Repos[0].FullName = %q, want %q", cached.Repos[0].FullName, "acme/repo")
+	}
+}
+
+func TestGetReturnsErrorWhenOrgMissing(t *testing.T) {
+	c := newTestCache(t)
+
+	if _, err := c.Get("missing"); err == nil {
+		t.Fatalf("Get() expected error for missing org")
+	}
+}
+
+func TestIsExpired(t *testing.T) {
+	c := newTestCache(t)
+	c.SetTTL(5 * time.Millisecond)
+
+	if err := c.Set("acme", []github.Repo{{FullName: "acme/repo", CreatedAt: time.Now()}}); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	if c.IsExpired("acme") {
+		t.Fatalf("IsExpired(acme) = true, want false")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	if !c.IsExpired("acme") {
+		t.Fatalf("IsExpired(acme) = false, want true")
+	}
+
+	if !c.IsExpired("missing") {
+		t.Fatalf("IsExpired(missing) = false, want true")
+	}
+}
+
+func TestGetAllReposDeduplicatesAcrossOrgs(t *testing.T) {
+	c := newTestCache(t)
+	c.SetTTL(time.Hour)
+
+	now := time.Now()
+	if err := c.Set("acme", []github.Repo{
+		{FullName: "acme/shared", CreatedAt: now.Add(-time.Hour)},
+		{FullName: "acme/one", CreatedAt: now.Add(-2 * time.Hour)},
+	}); err != nil {
+		t.Fatalf("Set(acme) error = %v", err)
+	}
+
+	if err := c.Set("tools", []github.Repo{
+		{FullName: "acme/shared", CreatedAt: now},
+		{FullName: "tools/two", CreatedAt: now.Add(-3 * time.Hour)},
+	}); err != nil {
+		t.Fatalf("Set(tools) error = %v", err)
+	}
+
+	allRepos, err := c.GetAllRepos()
+	if err != nil {
+		t.Fatalf("GetAllRepos() error = %v", err)
+	}
+
+	seen := make(map[string]bool)
+	for _, repo := range allRepos {
+		seen[repo.FullName] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("unique repos = %d, want 3", len(seen))
+	}
+	if !seen["acme/shared"] || !seen["acme/one"] || !seen["tools/two"] {
+		t.Fatalf("unexpected repo set: %+v", seen)
+	}
+}
+
+func TestGetAllReposSkipsExpiredOrgCaches(t *testing.T) {
+	c := newTestCache(t)
+
+	c.SetTTL(5 * time.Millisecond)
+	if err := c.Set("stale", []github.Repo{{FullName: "stale/repo", CreatedAt: time.Now()}}); err != nil {
+		t.Fatalf("Set(stale) error = %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	c.SetTTL(time.Hour)
+	if err := c.Set("fresh", []github.Repo{{FullName: "fresh/repo", CreatedAt: time.Now()}}); err != nil {
+		t.Fatalf("Set(fresh) error = %v", err)
+	}
+
+	allRepos, err := c.GetAllRepos()
+	if err != nil {
+		t.Fatalf("GetAllRepos() error = %v", err)
+	}
+	if len(allRepos) != 1 {
+		t.Fatalf("len(allRepos) = %d, want 1", len(allRepos))
+	}
+	if allRepos[0].FullName != "fresh/repo" {
+		t.Fatalf("allRepos[0].FullName = %q, want %q", allRepos[0].FullName, "fresh/repo")
+	}
+}

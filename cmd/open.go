@@ -47,13 +47,24 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	}
 
 	c := cache.New()
-	if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
-		fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
-	}
-
 	allRepos, err := c.GetAllRepos()
 	if err != nil {
 		return fmt.Errorf("failed to load cached repos: %w", err)
+	}
+
+	var backgroundRefreshDone <-chan error
+	if len(allRepos) == 0 {
+		if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
+			fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
+		}
+
+		allRepos, err = c.GetAllRepos()
+		if err != nil {
+			return fmt.Errorf("failed to load cached repos: %w", err)
+		}
+	} else {
+		backgroundRefreshDone = startAutoRefreshConfiguredCaches(cfg, c)
+		defer warnIfBackgroundAutoRefreshFailed(backgroundRefreshDone)
 	}
 
 	if len(allRepos) == 0 {
@@ -261,19 +272,7 @@ func getRepoPath(cfg *config.Config, repoFullName string, isWorktree bool, defau
 	repoPath := filepath.Join(cloneDir, owner, repoName)
 
 	if isWorktree {
-		branchName := defaultBranch
-		if branchName == "" {
-			c := cache.New()
-			allRepos, err := c.GetAllRepos()
-			if err == nil {
-				for _, r := range allRepos {
-					if r.FullName == repoFullName {
-						branchName = r.DefaultBranch
-						break
-					}
-				}
-			}
-		}
+		branchName := resolveDefaultBranch(repoFullName, defaultBranch)
 		repoPath = filepath.Join(repoPath, branchName)
 	}
 

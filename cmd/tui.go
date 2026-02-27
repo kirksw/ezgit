@@ -27,14 +27,26 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	}
 
 	c := cache.New()
-	if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
-		fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
-	}
-
 	allRepos, err := c.GetAllRepos()
 	if err != nil {
 		fmt.Printf("Warning: failed to load cached repos: %v\n", err)
 		allRepos = []github.Repo{}
+	}
+
+	var backgroundRefreshDone <-chan error
+	if len(allRepos) == 0 {
+		if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
+			fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
+		}
+
+		allRepos, err = c.GetAllRepos()
+		if err != nil {
+			fmt.Printf("Warning: failed to load cached repos: %v\n", err)
+			allRepos = []github.Repo{}
+		}
+	} else {
+		backgroundRefreshDone = startAutoRefreshConfiguredCaches(cfg, c)
+		defer warnIfBackgroundAutoRefreshFailed(backgroundRefreshDone)
 	}
 
 	cloneDir := cfg.GetCloneDir()

@@ -305,6 +305,55 @@ func TestWorktreeOptionsForRepoHidesRepoRoot(t *testing.T) {
 	}
 }
 
+func TestEnsureSelectedRepoWorktreesLoadedLoadsOnceAndNormalizes(t *testing.T) {
+	repo := github.Repo{Name: "foo", FullName: "org/foo"}
+	m := newModel([]github.Repo{repo}, false, map[string]bool{"org/foo": true}, true)
+
+	loadCalls := 0
+	m.worktreeLoader = func(repo github.Repo) ([]string, error) {
+		loadCalls++
+		return []string{" main ", "", "review", "main"}, nil
+	}
+
+	m.ensureSelectedRepoWorktreesLoaded()
+
+	if loadCalls != 1 {
+		t.Fatalf("loadCalls=%d, want 1", loadCalls)
+	}
+	got := m.repoWorktrees[repo.FullName]
+	if len(got) != 2 {
+		t.Fatalf("len(worktrees)=%d, want 2", len(got))
+	}
+	if got[0] != "main" || got[1] != "review" {
+		t.Fatalf("worktrees=%v, want [main review]", got)
+	}
+
+	m.ensureSelectedRepoWorktreesLoaded()
+	if loadCalls != 1 {
+		t.Fatalf("loadCalls after second ensure=%d, want 1", loadCalls)
+	}
+}
+
+func TestEnsureSelectedRepoWorktreesLoadedSkipsNonLocalRepo(t *testing.T) {
+	repo := github.Repo{Name: "foo", FullName: "org/foo"}
+	m := newModel([]github.Repo{repo}, false, map[string]bool{}, true)
+
+	loadCalls := 0
+	m.worktreeLoader = func(repo github.Repo) ([]string, error) {
+		loadCalls++
+		return []string{"main"}, nil
+	}
+
+	m.ensureSelectedRepoWorktreesLoaded()
+
+	if loadCalls != 0 {
+		t.Fatalf("loadCalls=%d, want 0", loadCalls)
+	}
+	if len(m.repoWorktrees[repo.FullName]) != 0 {
+		t.Fatalf("expected no cached worktrees for non-local repo")
+	}
+}
+
 func TestOpenModeViewShowsOpenedWorktreeHighlight(t *testing.T) {
 	repo := github.Repo{Name: "foo", FullName: "org/foo"}
 	m := newModel([]github.Repo{repo}, false, map[string]bool{"org/foo": true}, true)

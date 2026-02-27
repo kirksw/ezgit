@@ -103,6 +103,76 @@ func TestParseYesNoRequired(t *testing.T) {
 	}
 }
 
+func TestResolveDefaultBranchPrefersExplicitValue(t *testing.T) {
+	originalLoader := loadRepoDefaultBranches
+	defer func() {
+		loadRepoDefaultBranches = originalLoader
+		resetDefaultBranchLookupCache()
+	}()
+
+	resetDefaultBranchLookupCache()
+	lookupCalls := 0
+	loadRepoDefaultBranches = func() map[string]string {
+		lookupCalls++
+		return map[string]string{"acme/repo": "trunk"}
+	}
+
+	got := resolveDefaultBranch("acme/repo", "develop")
+	if got != "develop" {
+		t.Fatalf("resolveDefaultBranch() = %q, want %q", got, "develop")
+	}
+	if lookupCalls != 0 {
+		t.Fatalf("lookupCalls = %d, want 0", lookupCalls)
+	}
+}
+
+func TestResolveDefaultBranchLoadsRepoDefaultsOncePerHome(t *testing.T) {
+	originalLoader := loadRepoDefaultBranches
+	defer func() {
+		loadRepoDefaultBranches = originalLoader
+		resetDefaultBranchLookupCache()
+	}()
+
+	resetDefaultBranchLookupCache()
+	lookupCalls := 0
+	loadRepoDefaultBranches = func() map[string]string {
+		lookupCalls++
+		if lookupCalls == 1 {
+			return map[string]string{"acme/repo": "trunk"}
+		}
+		return map[string]string{"acme/repo": "main"}
+	}
+
+	t.Setenv("HOME", t.TempDir())
+
+	got := resolveDefaultBranch("acme/repo", "")
+	if got != "trunk" {
+		t.Fatalf("resolveDefaultBranch() = %q, want %q", got, "trunk")
+	}
+
+	got = resolveDefaultBranch("acme/repo", "")
+	if got != "trunk" {
+		t.Fatalf("resolveDefaultBranch() second call = %q, want %q", got, "trunk")
+	}
+	if lookupCalls != 1 {
+		t.Fatalf("lookupCalls = %d, want 1", lookupCalls)
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	got = resolveDefaultBranch("acme/repo", "")
+	if got != "main" {
+		t.Fatalf("resolveDefaultBranch() after HOME change = %q, want %q", got, "main")
+	}
+	if lookupCalls != 2 {
+		t.Fatalf("lookupCalls after HOME change = %d, want 2", lookupCalls)
+	}
+
+	fallback := resolveDefaultBranch("missing/repo", "")
+	if fallback != "main" {
+		t.Fatalf("resolveDefaultBranch() fallback = %q, want %q", fallback, "main")
+	}
+}
+
 func TestResolveCloneDepthForLargeRepo(t *testing.T) {
 	cfg := &config.Config{
 		Git: config.GitConfig{

@@ -88,6 +88,8 @@ type FuzzySearchResult struct {
 	WorktreeBase     string
 }
 
+type RepoWorktreeLoader func(repo github.Repo) ([]string, error)
+
 type page int
 
 const (
@@ -110,6 +112,8 @@ type model struct {
 	openedWorktrees    map[string]map[string]bool
 	openMode           bool
 	repoWorktrees      map[string][]string
+	worktreeLoader     RepoWorktreeLoader
+	loadedWorktrees    map[string]bool
 	worktreeSelection  map[string]int
 	focusWorktreePane  bool
 	creatingWorktree   bool
@@ -164,6 +168,7 @@ func newModelWithControls(
 		openedRepos:       map[string]bool{},
 		openedWorktrees:   map[string]map[string]bool{},
 		repoWorktrees:     map[string][]string{},
+		loadedWorktrees:   map[string]bool{},
 		worktreeSelection: map[string]int{},
 		openMode:          openMode,
 		localOnly:         false,
@@ -186,6 +191,53 @@ func newModelWithControls(
 	m.repoList = l
 
 	return m
+}
+
+func normalizeWorktreeNames(worktrees []string) []string {
+	if len(worktrees) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(worktrees))
+	seen := make(map[string]struct{}, len(worktrees))
+	for _, worktree := range worktrees {
+		trimmed := strings.TrimSpace(worktree)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+
+	return normalized
+}
+
+func (m *model) ensureRepoWorktreesLoaded(repo *github.Repo) {
+	if !m.openMode || repo == nil || m.worktreeLoader == nil {
+		return
+	}
+	repoFullName := strings.TrimSpace(repo.FullName)
+	if repoFullName == "" || !m.localRepos[repoFullName] {
+		return
+	}
+	if m.loadedWorktrees[repoFullName] {
+		return
+	}
+
+	m.loadedWorktrees[repoFullName] = true
+	worktrees, err := m.worktreeLoader(*repo)
+	if err != nil {
+		m.repoWorktrees[repoFullName] = nil
+		return
+	}
+	m.repoWorktrees[repoFullName] = normalizeWorktreeNames(worktrees)
+}
+
+func (m *model) ensureSelectedRepoWorktreesLoaded() {
+	m.ensureRepoWorktreesLoaded(m.selectedRepoFromList())
 }
 
 func (m model) currentFilterLabel() string {
@@ -277,6 +329,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.worktreeInput.Width < 20 {
 			m.worktreeInput.Width = 20
 		}
+		m.ensureSelectedRepoWorktreesLoaded()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -361,6 +414,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.cycleFilter()
+				m.ensureSelectedRepoWorktreesLoaded()
 				return m, nil
 
 			case tea.KeyDown, tea.KeyCtrlN:
@@ -392,6 +446,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyRight:
 				if m.openMode {
 					m.focusWorktreePane = true
+					m.ensureSelectedRepoWorktreesLoaded()
 					return m, nil
 				}
 
@@ -473,6 +528,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.repoList.SetItems(m.filterRepos(current))
 		m.repoList.ResetSelected()
 	}
+	m.ensureSelectedRepoWorktreesLoaded()
 
 	return m, cmd
 }
@@ -1514,6 +1570,17 @@ func RunOpenFuzzySearch(repos []github.Repo, localRepos map[string]bool) (*Fuzzy
 }
 
 func RunOpenFuzzySearchWithOpened(repos []github.Repo, localRepos map[string]bool, openedRepos map[string]bool, openedWorktrees map[string]map[string]bool, worktreesByRepo map[string][]string) (*FuzzySearchResult, error) {
+	return RunOpenFuzzySearchWithOpenedAndLoader(repos, localRepos, openedRepos, openedWorktrees, worktreesByRepo, nil)
+}
+
+func RunOpenFuzzySearchWithOpenedAndLoader(
+	repos []github.Repo,
+	localRepos map[string]bool,
+	openedRepos map[string]bool,
+	openedWorktrees map[string]map[string]bool,
+	worktreesByRepo map[string][]string,
+	worktreeLoader RepoWorktreeLoader,
+) (*FuzzySearchResult, error) {
 	m := newModelWithControls(repos, false, localRepos, true, true, false)
 	if openedRepos != nil {
 		m.openedRepos = openedRepos
@@ -1522,9 +1589,14 @@ func RunOpenFuzzySearchWithOpened(repos []github.Repo, localRepos map[string]boo
 		m.openedWorktrees = openedWorktrees
 	}
 	if worktreesByRepo != nil {
-		m.repoWorktrees = worktreesByRepo
+		for repoFullName, worktrees := range worktreesByRepo {
+			m.repoWorktrees[repoFullName] = normalizeWorktreeNames(worktrees)
+			m.loadedWorktrees[repoFullName] = true
+		}
 	}
+	m.worktreeLoader = worktreeLoader
 	m.repoList.SetItems(m.filterRepos(m.textinput.Value()))
+	m.ensureSelectedRepoWorktreesLoaded()
 
 	p := tea.NewProgram(
 		m,
