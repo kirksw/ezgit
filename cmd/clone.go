@@ -88,13 +88,24 @@ var (
 )
 
 func init() {
-	rootCmd.Flags().StringVarP(&branch, "branch", "b", "", "clone specific branch (non-worktree clones)")
-	rootCmd.Flags().IntVar(&depth, "depth", 0, "create a shallow clone with specified depth")
-	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "suppress output")
-	rootCmd.Flags().StringVar(&keyPath, "key-path", "", "SSH key path (default: ~/.ssh/id_rsa)")
-	rootCmd.Flags().StringVarP(&cloneDest, "dest", "d", "", "destination directory")
-	rootCmd.Flags().StringVar(&featureWorktree, "feature", "", "create an additional feature worktree (worktree layout only)")
-	rootCmd.Flags().StringVar(&featureBaseBranch, "feature-base", "", "base branch for --feature (defaults to repository default branch)")
+	rootCmd.AddCommand(cloneCmd, addCmd, openCmd)
+
+	addCloneFlags(rootCmd, false)
+	addCloneFlags(cloneCmd, true)
+}
+
+func addCloneFlags(cmd *cobra.Command, includeLayout bool) {
+	cmd.Flags().StringVarP(&branch, "branch", "b", "", "clone specific branch (non-worktree clones)")
+	cmd.Flags().IntVar(&depth, "depth", 0, "create a shallow clone with specified depth")
+	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "suppress output")
+	cmd.Flags().StringVar(&keyPath, "key-path", "", "SSH key path (default: ~/.ssh/id_rsa)")
+	cmd.Flags().StringVarP(&cloneDest, "dest", "d", "", "destination directory")
+	if includeLayout {
+		cmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "clone as bare metadata repo with default worktrees")
+		cmd.Flags().BoolVar(&worktree, "bare", false, "alias for --worktree")
+	}
+	cmd.Flags().StringVar(&featureWorktree, "feature", "", "create an additional feature worktree (worktree layout only)")
+	cmd.Flags().StringVar(&featureBaseBranch, "feature-base", "", "base branch for --feature (defaults to repository default branch)")
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {

@@ -124,6 +124,24 @@ func TestIsExpired(t *testing.T) {
 	}
 }
 
+func TestListAllIsSorted(t *testing.T) {
+	c := newTestCache(t)
+	if err := c.Set("zeta", []github.Repo{}); err != nil {
+		t.Fatalf("Set(zeta) error = %v", err)
+	}
+	if err := c.Set("acme", []github.Repo{}); err != nil {
+		t.Fatalf("Set(acme) error = %v", err)
+	}
+
+	got, err := c.ListAll()
+	if err != nil {
+		t.Fatalf("ListAll() error = %v", err)
+	}
+	if len(got) != 2 || got[0] != "acme" || got[1] != "zeta" {
+		t.Fatalf("ListAll() = %v, want [acme zeta]", got)
+	}
+}
+
 func TestGetAllReposDeduplicatesAcrossOrgs(t *testing.T) {
 	c := newTestCache(t)
 	c.SetTTL(time.Hour)

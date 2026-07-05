@@ -224,6 +224,7 @@ func (c *OrgCache) ListAll() ([]string, error) {
 		orgs = append(orgs, org)
 	}
 
+	sort.Strings(orgs)
 	return orgs, nil
 }
 

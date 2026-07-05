@@ -71,6 +71,18 @@ Convert a local repository to bare metadata in `.git` + worktrees. Without a pat
 
 Flags: `-w` create worktree for specific branch(es), `--all-worktrees` create worktree for all branches, `--no-worktrees` skip worktree creation, `--key-path` SSH key.
 
+### Agent-friendly commands
+
+```bash
+ezgit list orgs                 # cached org names, one per line
+ezgit list repos                # all cached repos, one per line
+ezgit list repos --local        # cached repos present under clone_dir
+ezgit clone owner/repo          # normal clone
+ezgit clone --worktree owner/repo  # bare metadata repo + default worktrees
+ezgit clone --bare owner/repo      # alias for --worktree
+ezgit add owner/repo feature-x  # add/create a worktree
+```
+
 ### `ezgit cache <subcommand>`
 
 Cache operations: `refresh`, `list`, `search`, `invalidate`.

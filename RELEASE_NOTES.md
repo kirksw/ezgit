@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.0.13 - 2026-07-05
+
+Agent-friendly CLI surface:
+- Added `ezgit list orgs` for one-line cached organization output.
+- Added `ezgit list repos` and `ezgit list repos --local` for scriptable repo discovery.
+- Registered explicit `clone`, `add`, and `open` commands in help, with `ezgit clone --worktree` / `--bare` for bare metadata plus worktrees.
+- Made cached organization listing deterministic.
+
 ## 0.0.12 - 2026-02-27
 
 Warm-path performance and open-flow improvements:
