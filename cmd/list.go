@@ -6,6 +6,7 @@ import (
 
 	"github.com/kirksw/ezgit/internal/cache"
 	"github.com/kirksw/ezgit/internal/config"
+	"github.com/kirksw/ezgit/internal/git"
 	"github.com/kirksw/ezgit/internal/github"
 	"github.com/kirksw/ezgit/internal/utils"
 	"github.com/spf13/cobra"
@@ -30,11 +31,18 @@ var listReposCmd = &cobra.Command{
 	RunE:  runListRepos,
 }
 
+var listWorktreesCmd = &cobra.Command{
+	Use:   "worktrees <repo>",
+	Short: "List local worktrees for a repository",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runListWorktrees,
+}
+
 var listReposLocalOnly bool
 
 func init() {
 	rootCmd.AddCommand(listCmd)
-	listCmd.AddCommand(listOrgsCmd, listReposCmd)
+	listCmd.AddCommand(listOrgsCmd, listReposCmd, listWorktreesCmd)
 	listReposCmd.Flags().BoolVar(&listReposLocalOnly, "local", false, "only list repos already cloned under clone_dir")
 }
 
@@ -97,6 +105,38 @@ func collectCachedRepos(c *cache.OrgCache) ([]github.Repo, error) {
 	return repos, nil
 }
 
+func runListWorktrees(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	repoFullName, ok := extractRepoFullName(args[0])
+	if !ok {
+		return fmt.Errorf("invalid repo format: %s", args[0])
+	}
+
+	repoPath := getRepoPath(cfg, repoFullName, false, resolveDefaultBranch(repoFullName, ""))
+	state, err := detectExistingRepoState(repoPath)
+	if err != nil {
+		return err
+	}
+	if state == existingRepoMissing || state == existingRepoRegular {
+		return nil
+	}
+	if state == existingRepoNonRepo {
+		return fmt.Errorf("destination exists but is not a git repository: %s", repoPath)
+	}
+
+	worktrees, err := git.New().ListWorktrees(repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to list worktrees: %w", err)
+	}
+	for _, worktree := range sortedStrings(worktrees) {
+		fmt.Println(worktree)
+	}
+	return nil
+}
+
 func sortedRepoNames(repos []github.Repo, localRepos map[string]bool, localOnly bool) []string {
 	names := make([]string, 0, len(repos))
 	for _, repo := range repos {
@@ -105,6 +145,11 @@ func sortedRepoNames(repos []github.Repo, localRepos map[string]bool, localOnly 
 		}
 		names = append(names, repo.FullName)
 	}
-	sort.Strings(names)
-	return names
+	return sortedStrings(names)
+}
+
+func sortedStrings(values []string) []string {
+	sorted := append([]string(nil), values...)
+	sort.Strings(sorted)
+	return sorted
 }

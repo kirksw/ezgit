@@ -7,21 +7,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kirksw/ezgit/internal/cache"
 	"github.com/kirksw/ezgit/internal/config"
 	"github.com/kirksw/ezgit/internal/git"
 	"github.com/kirksw/ezgit/internal/github"
 	"github.com/kirksw/ezgit/internal/ui"
-	"github.com/kirksw/ezgit/internal/utils"
 	"github.com/spf13/cobra"
 )
 
 const createNewWorktreeOption = "+ Create new worktree"
 
 var openCmd = &cobra.Command{
-	Use:   "open [repo] [worktree-name]",
+	Use:   "open <repo> [worktree-name]",
 	Short: "Open a locally cloned repository with the configured open command",
-	Args:  cobra.MaximumNArgs(2),
+	Args:  cobra.RangeArgs(1, 2),
 	RunE:  runOpen,
 }
 
@@ -29,71 +27,11 @@ func init() {
 }
 
 func runOpen(cmd *cobra.Command, args []string) error {
-	if len(args) > 0 {
-		if len(args) != 2 {
-			return fmt.Errorf("usage: ezgit open <repo> <worktree-name>")
-		}
-		return runOpenDirect(args[0], args[1])
+	worktreeName := ""
+	if len(args) == 2 {
+		worktreeName = args[1]
 	}
-
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	cloneDir := cfg.GetCloneDir()
-	if cloneDir == "" {
-		return fmt.Errorf("clone_dir must be set in config to use 'ezgit open'")
-	}
-
-	c := cache.New()
-	allRepos, err := c.GetAllRepos()
-	if err != nil {
-		return fmt.Errorf("failed to load cached repos: %w", err)
-	}
-
-	var backgroundRefreshDone <-chan error
-	if len(allRepos) == 0 {
-		if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
-			fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
-		}
-
-		allRepos, err = c.GetAllRepos()
-		if err != nil {
-			return fmt.Errorf("failed to load cached repos: %w", err)
-		}
-	} else {
-		backgroundRefreshDone = startAutoRefreshConfiguredCaches(cfg, c)
-		defer warnIfBackgroundAutoRefreshFailed(backgroundRefreshDone)
-	}
-
-	if len(allRepos) == 0 {
-		return fmt.Errorf("no cached repositories found. Run 'ezgit cache refresh' to fetch repos")
-	}
-
-	seedDefaultBranchLookupFromRepos(allRepos)
-
-	localRepos := utils.BuildLocalRepoMap(cloneDir, allRepos)
-
-	var localOnly []github.Repo
-	for _, repo := range allRepos {
-		if localRepos[repo.FullName] {
-			localOnly = append(localOnly, repo)
-		}
-	}
-
-	if len(localOnly) == 0 {
-		return fmt.Errorf("no locally cloned repositories found in %s", cloneDir)
-	}
-
-	worktreeLoader := buildOpenWorktreeLoader(cfg, localRepos, git.New())
-
-	result, err := ui.RunOpenFuzzySearchWithOpenedAndLoader(localOnly, localRepos, nil, nil, nil, worktreeLoader)
-	if err != nil {
-		return fmt.Errorf("cancelled: %w", err)
-	}
-
-	return runOpenRepoSelection(cfg, result.Repo, localOnly, localRepos, result.SelectedWorktree)
+	return runOpenDirect(args[0], worktreeName)
 }
 
 func buildOpenWorktreeLoader(cfg *config.Config, localRepos map[string]bool, lister repoWorktreeLister) ui.RepoWorktreeLoader {
@@ -128,25 +66,102 @@ func runOpenDirect(repoInput string, worktreeName string) error {
 	}
 
 	worktreeName = strings.TrimSpace(worktreeName)
-	if worktreeName == "" {
-		return fmt.Errorf("worktree name cannot be empty")
+	if worktreeName != "" {
+		if err := ensureOpenWorktree(cfg, repoFullName, worktreeName); err != nil {
+			return err
+		}
+		return runOpenCommand(cfg, repoFullName, worktreeName)
 	}
 
-	if err := runCloneWithWorktree(cfg, repoFullName, worktreeName); err != nil {
-		return err
-	}
-
-	repoRootPath := getRepoPath(cfg, repoFullName, false, "")
+	defaultBranch := resolveDefaultBranch(repoFullName, "")
+	repoRootPath := getRepoPath(cfg, repoFullName, false, defaultBranch)
 	if repoRootPath == "" {
 		return fmt.Errorf("failed to resolve local path for %s", repoFullName)
 	}
 
-	absPath := resolveOpenTargetPath(repoRootPath, worktreeName)
-	if _, err := os.Stat(absPath); err != nil {
-		return fmt.Errorf("worktree path does not exist: %s", absPath)
+	if _, err := os.Stat(repoRootPath); os.IsNotExist(err) {
+		originalWorktree := worktree
+		worktree = false
+		cloneErr := runDirectClone(cfg, repoFullName, defaultBranch, 0)
+		worktree = originalWorktree
+		if cloneErr != nil {
+			return cloneErr
+		}
 	}
 
-	return runSeshConnect(absPath)
+	return runOpenCommand(cfg, repoFullName, "")
+}
+
+func ensureOpenWorktree(cfg *config.Config, repoFullName, worktreeName string) error {
+	defaultBranch := resolveDefaultBranch(repoFullName, "")
+	repoRootPath := getRepoPath(cfg, repoFullName, false, defaultBranch)
+	if repoRootPath == "" {
+		return fmt.Errorf("failed to resolve local path for %s", repoFullName)
+	}
+
+	state, err := detectExistingRepoState(repoRootPath)
+	if err != nil {
+		return err
+	}
+
+	switch state {
+	case existingRepoMissing:
+		return cloneRepoWithWorktrees(cfg, repoFullName, defaultBranch, worktreeName)
+	case existingRepoRegular:
+		if err := runConvertPath(repoRootPath, defaultBranch); err != nil {
+			return err
+		}
+	case existingRepoNonRepo:
+		return fmt.Errorf("destination exists but is not a git repository: %s", repoRootPath)
+	}
+
+	return ensureWorktreeExists(git.New(), repoRootPath, repoFullName, defaultBranch, worktreeName)
+}
+
+func cloneRepoWithWorktrees(cfg *config.Config, repoFullName, defaultBranch, worktreeName string) error {
+	plan := &cloneWorktreePlan{CreateDefault: true, CreateReview: true}
+	if !isBuiltInWorktree(worktreeName, defaultBranch) {
+		plan.Custom = []cloneCustomWorktree{{Name: worktreeName, BaseBranch: defaultBranch}}
+	}
+
+	originalWorktree := worktree
+	originalSkipPrompt := skipWorktreePrompt
+	originalForcedPlan := forcedClonePlan
+	worktree = true
+	skipWorktreePrompt = true
+	forcedClonePlan = plan
+	defer func() {
+		worktree = originalWorktree
+		skipWorktreePrompt = originalSkipPrompt
+		forcedClonePlan = originalForcedPlan
+	}()
+
+	return runDirectClone(cfg, repoFullName, defaultBranch, 0)
+}
+
+func ensureWorktreeExists(gitMgr git.GitManager, repoRootPath, repoFullName, defaultBranch, worktreeName string) error {
+	worktrees, err := gitMgr.ListWorktrees(repoRootPath)
+	if err != nil {
+		return fmt.Errorf("failed to list worktrees: %w", err)
+	}
+	if containsString(worktrees, worktreeName) {
+		return nil
+	}
+
+	metadataPath := filepath.Join(repoRootPath, ".git")
+	worktreePath := filepath.Join(repoRootPath, worktreeName)
+	switch {
+	case worktreeName == defaultBranch:
+		return gitMgr.CreateWorktree(metadataPath, worktreePath, defaultBranch)
+	case worktreeName == "review":
+		return gitMgr.CreateDetachedWorktree(metadataPath, worktreePath, defaultBranch)
+	default:
+		return addWorktreeToRepo(gitMgr, repoFullName, repoRootPath, metadataPath, worktreeName)
+	}
+}
+
+func isBuiltInWorktree(worktreeName, defaultBranch string) bool {
+	return worktreeName == defaultBranch || worktreeName == "review"
 }
 
 func runSeshConnect(absPath string) error {

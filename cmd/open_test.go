@@ -56,13 +56,12 @@ func TestContainsString(t *testing.T) {
 	}
 }
 
-func TestRunOpenRequiresWorktreeWhenRepoArgProvided(t *testing.T) {
-	err := runOpen(nil, []string{"lunarway/hubble-cli"})
-	if err == nil {
-		t.Fatal("expected usage error")
+func TestIsBuiltInWorktree(t *testing.T) {
+	if !isBuiltInWorktree("main", "main") || !isBuiltInWorktree("review", "main") {
+		t.Fatal("expected main/review to be built-in worktrees")
 	}
-	if err.Error() != "usage: ezgit open <repo> <worktree-name>" {
-		t.Fatalf("unexpected error: %v", err)
+	if isBuiltInWorktree("feature", "main") {
+		t.Fatal("did not expect feature to be built-in")
 	}
 }
 

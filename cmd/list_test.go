@@ -18,8 +18,16 @@ func TestSortedRepoNamesFiltersLocalRepos(t *testing.T) {
 	}
 }
 
+func TestSortedStringsCopiesAndSorts(t *testing.T) {
+	values := []string{"b", "a"}
+	got := sortedStrings(values)
+	if got[0] != "a" || got[1] != "b" || values[0] != "b" {
+		t.Fatalf("sortedStrings() = %v, original = %v", got, values)
+	}
+}
+
 func TestAgentCommandsAreRegistered(t *testing.T) {
-	for _, path := range [][]string{{"list", "orgs"}, {"list", "repos"}, {"clone"}, {"add"}, {"open"}} {
+	for _, path := range [][]string{{"list", "orgs"}, {"list", "repos"}, {"list", "worktrees"}, {"describe"}, {"clone"}, {"add"}, {"open"}} {
 		cmd := rootCmd
 		for _, name := range path {
 			next, _, err := cmd.Find([]string{name})
