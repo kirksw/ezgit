@@ -48,9 +48,9 @@ type cloneWorktreePlan struct {
 }
 
 var cloneCmd = &cobra.Command{
-	Use:   "clone [repo] [worktreename]",
+	Use:   "clone <repo> [worktreename]",
 	Short: "Clone a GitHub repository",
-	Args:  cobra.MaximumNArgs(2),
+	Args:  cobra.RangeArgs(1, 2),
 	RunE:  runClone,
 }
 
@@ -163,10 +163,6 @@ func runClone(cmd *cobra.Command, args []string) error {
 
 	if !worktree && (strings.TrimSpace(featureWorktree) != "" || strings.TrimSpace(featureBaseBranch) != "") {
 		return fmt.Errorf("--feature and --feature-base require --worktree")
-	}
-
-	if len(args) == 0 {
-		return runFuzzyClone(cfg, true)
 	}
 
 	if len(args) == 2 {

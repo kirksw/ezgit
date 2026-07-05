@@ -5,19 +5,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kirksw/ezgit/internal/cache"
-	"github.com/kirksw/ezgit/internal/config"
 	"github.com/kirksw/ezgit/internal/git"
-	"github.com/kirksw/ezgit/internal/github"
 	"github.com/kirksw/ezgit/internal/ui"
 	"github.com/kirksw/ezgit/internal/utils"
 	"github.com/spf13/cobra"
 )
 
 var convertCmd = &cobra.Command{
-	Use:   "convert [path]",
+	Use:   "convert <path>",
 	Short: "Convert an existing repository to bare with worktrees",
-	Args:  cobra.MaximumNArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE:  runConvert,
 }
 
@@ -38,52 +35,7 @@ func init() {
 }
 
 func runConvert(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
-		return runConvertFromLocalRepoPicker()
-	}
-
 	return runConvertPath(args[0], "")
-}
-
-func runConvertFromLocalRepoPicker() error {
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	cloneDir := cfg.GetCloneDir()
-	if cloneDir == "" {
-		return fmt.Errorf("clone_dir must be set in config to use 'ezgit convert' without a path")
-	}
-
-	c := cache.New()
-	if err := autoRefreshConfiguredCaches(cfg, c); err != nil {
-		fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
-	}
-
-	allRepos, err := c.GetAllRepos()
-	if err != nil {
-		return fmt.Errorf("failed to load cached repos: %w", err)
-	}
-
-	localRepos := utils.BuildLocalRepoMap(cloneDir, allRepos)
-	var localOnly []github.Repo
-	for _, repo := range allRepos {
-		if localRepos[repo.FullName] {
-			localOnly = append(localOnly, repo)
-		}
-	}
-	if len(localOnly) == 0 {
-		return fmt.Errorf("no locally cloned repositories found in %s", cloneDir)
-	}
-
-	result, err := ui.RunOpenFuzzySearch(localOnly, localRepos)
-	if err != nil {
-		return fmt.Errorf("cancelled: %w", err)
-	}
-
-	repoPath := getRepoPath(cfg, result.Repo.FullName, false, result.Repo.DefaultBranch)
-	return runConvertPath(repoPath, result.Repo.DefaultBranch)
 }
 
 func runConvertPath(repoPath, repoDefaultBranch string) error {

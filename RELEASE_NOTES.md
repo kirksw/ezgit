@@ -5,7 +5,11 @@
 Agent-friendly CLI surface:
 - Added `ezgit list orgs` for one-line cached organization output.
 - Added `ezgit list repos` and `ezgit list repos --local` for scriptable repo discovery.
+- Added `ezgit list worktrees <repo>` and `ezgit describe <repo>` for local repo metadata.
+- Added root `ezgit --version` / `ezgit -v` output.
 - Registered explicit `clone`, `add`, and `open` commands in help, with `ezgit clone --worktree` / `--bare` for bare metadata plus worktrees.
+- Kept the TUI picker limited to bare `ezgit`; subcommands now require CLI arguments.
+- Made `ezgit open <repo>` open the repo root while `ezgit open <repo> <worktree>` ensures/converts to worktree layout.
 - Made cached organization listing deterministic.
 
 ## 0.0.12 - 2026-02-27

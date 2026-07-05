@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/kirksw/ezgit/internal/config"
+	"github.com/kirksw/ezgit/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -13,6 +14,7 @@ var rootCmd = &cobra.Command{
 	Args:          cobra.MaximumNArgs(2),
 	Short:         "An easy GitHub repository management CLI tool",
 	Long:          `ezgit helps manage GitHub repositories with support for cloning, bare conversions, worktrees, and caching.`,
+	Version:       "v" + version.Value,
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	RunE:          runRoot,
@@ -32,7 +34,9 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.SetVersionTemplate("ezgit {{.Version}}\n")
+	rootCmd.Flags().BoolP("version", "v", false, "print version and exit")
+	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "verbose output")
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "config file path (default: ./config.toml, ~/.config/ezgit/config.toml, or ~/.ezgit.toml)")
 	rootCmd.Flags().BoolVar(&noOpen, "no-open", false, "prepare repository/worktree but do not run open command")
 }

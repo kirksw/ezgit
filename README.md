@@ -49,6 +49,8 @@ Primary command. It ensures local state, then runs `open_command` unless `--no-o
 - `ezgit owner/repo`: ensure repo exists (regular clone), then open.
 - `ezgit owner/repo worktree`: ensure worktree exists (worktree layout), then open.
 
+The TUI picker is only available from bare `ezgit`; subcommands stay scriptable.
+
 No-arg picker shortcuts:
 
 - `tab`: toggle repo scope `all -> local -> opened`.
@@ -65,22 +67,26 @@ Worktree mode is now implicit:
 - positional worktree name is provided (`ezgit owner/repo worktree`), or
 - in interactive no-arg flow, more than one worktree is selected.
 
-### `ezgit convert [path]`
+### `ezgit convert <path>`
 
-Convert a local repository to bare metadata in `.git` + worktrees. Without a path, opens a fuzzy picker over local repos.
+Convert a local repository to bare metadata in `.git` + worktrees.
 
 Flags: `-w` create worktree for specific branch(es), `--all-worktrees` create worktree for all branches, `--no-worktrees` skip worktree creation, `--key-path` SSH key.
 
 ### Agent-friendly commands
 
 ```bash
-ezgit list orgs                 # cached org names, one per line
-ezgit list repos                # all cached repos, one per line
-ezgit list repos --local        # cached repos present under clone_dir
-ezgit clone owner/repo          # normal clone
-ezgit clone --worktree owner/repo  # bare metadata repo + default worktrees
-ezgit clone --bare owner/repo      # alias for --worktree
-ezgit add owner/repo feature-x  # add/create a worktree
+ezgit -v                          # print version and exit
+ezgit --version                   # print version and exit
+ezgit list orgs                   # cached org names, one per line
+ezgit list repos                  # all cached repos, one per line
+ezgit list repos --local          # cached repos present under clone_dir
+ezgit list worktrees owner/repo   # local worktrees, one per line
+ezgit describe owner/repo         # JSON: cloned/layout/worktrees/path
+ezgit open owner/repo             # ensure normal clone, open repo root
+ezgit open owner/repo feature-x   # ensure bare worktree layout, open feature-x
+ezgit clone --worktree owner/repo # bare metadata repo + default worktrees
+ezgit clone --bare owner/repo     # alias for --worktree
 ```
 
 ### `ezgit cache <subcommand>`
