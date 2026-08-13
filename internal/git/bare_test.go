@@ -123,6 +123,59 @@ func TestConvertToBareProducesBareRepository(t *testing.T) {
 	}
 }
 
+func TestRemoveWorktreeForceRemovesCheckoutAndKeepsBranch(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreeDir := filepath.Join(tmpDir, "feature")
+
+	runGit(t, "", "init", repoDir)
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "test")
+	makeCommit(t, repoDir, "README.md", "hello\n", "initial commit")
+	runGit(t, repoDir, "worktree", "add", "-b", "feature", worktreeDir)
+	if err := os.WriteFile(filepath.Join(worktreeDir, "dirty.txt"), []byte("dirty\n"), 0644); err != nil {
+		t.Fatalf("failed to dirty worktree: %v", err)
+	}
+
+	gitMgr := New()
+	if err := gitMgr.RemoveWorktree(repoDir, worktreeDir, true); err != nil {
+		t.Fatalf("RemoveWorktree() error = %v", err)
+	}
+	if _, err := os.Stat(worktreeDir); !os.IsNotExist(err) {
+		t.Fatalf("worktree directory still exists, err=%v", err)
+	}
+	branches := runGit(t, repoDir, "branch", "--format=%(refname:short)")
+	if !strings.Contains(branches, "feature") {
+		t.Fatalf("feature branch was removed: %s", branches)
+	}
+}
+
+func TestListWorktreeDetailsIncludesPathAndBranch(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreeDir := filepath.Join(tmpDir, "feature")
+
+	runGit(t, "", "init", repoDir)
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "test")
+	makeCommit(t, repoDir, "README.md", "hello\n", "initial commit")
+	runGit(t, repoDir, "worktree", "add", "-b", "feature", worktreeDir)
+
+	details, err := New().ListWorktreeDetails(repoDir)
+	if err != nil {
+		t.Fatalf("ListWorktreeDetails() error = %v", err)
+	}
+	found := false
+	for _, detail := range details {
+		if normalizePathForCompare(detail.Path) == normalizePathForCompare(worktreeDir) && detail.Branch == "feature" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ListWorktreeDetails() = %+v, missing feature worktree", details)
+	}
+}
+
 func TestListBranchesSkipsSymbolicOriginRef(t *testing.T) {
 	tmpDir := t.TempDir()
 	originDir := filepath.Join(tmpDir, "origin.git")

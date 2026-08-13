@@ -85,8 +85,11 @@ ezgit list worktrees owner/repo   # local worktrees, one per line
 ezgit describe owner/repo         # JSON: cloned/layout/worktrees/path
 ezgit open owner/repo             # ensure normal clone, open repo root
 ezgit open owner/repo feature-x   # ensure bare worktree layout, open feature-x
-ezgit clone --worktree owner/repo # bare metadata repo + default worktrees
+ezgit clone --worktree owner/repo # bare metadata + default-branch worktree
 ezgit clone --bare owner/repo     # alias for --worktree
+ezgit wt add owner/repo feature-x # add feature worktree from default branch
+ezgit wt prune owner/repo         # preview worktrees inactive for 14+ days
+ezgit skill > SKILL.md            # generate the ezgit agent skill
 ```
 
 ### `ezgit cache <subcommand>`
@@ -99,13 +102,40 @@ Flags (on `cache`): `--force` full refresh regardless of TTL, `--ttl` custom TTL
 
 Worktrees let you check out multiple branches simultaneously without stashing or switching — useful for code review, parallel feature work, and CI investigation.
 
-Worktree-mode clone/convert layout:
+Non-interactive `clone --worktree` and `clone --bare` create bare metadata plus the default-branch worktree:
 
 ```text
 <repo>/.git/      # bare metadata
-<repo>/main/      # default branch worktree
-<repo>/review/    # review worktree
+<repo>/main/      # default branch worktree (name varies by repository)
 <repo>/<feature>/ # optional feature worktree
+```
+
+The interactive worktree planner can also create a detached `review/` worktree.
+
+### `ezgit worktree` / `ezgit wt`
+
+Manage worktrees through scriptable commands:
+
+```bash
+ezgit worktree add owner/repo feature-x
+ezgit wt add owner/repo feature-x
+ezgit worktree prune owner/repo             # preview 14-day candidates
+ezgit wt prune owner/repo --apply           # force-remove candidates
+ezgit wt prune owner/repo --older-than 30d  # use another age
+```
+
+`add` creates a feature branch and worktree from the repository default branch.
+The existing `ezgit add owner/repo feature-x` command remains an alias-compatible top-level command.
+`prune` uses the newest filesystem modification time in each worktree and previews worktrees older than 14 days by default.
+It always protects `main` and `master`, ignores `.git` metadata timestamps, and keeps branches.
+`--apply` force-removes the listed checkouts, including dirty worktrees.
+
+### `ezgit skill`
+
+Print an agent-compatible ezgit `SKILL.md` to standard output:
+
+```bash
+ezgit skill > SKILL.md
 ```
 
 ## Config

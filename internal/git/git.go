@@ -1,10 +1,16 @@
 package git
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+type Worktree struct {
+	Path   string
+	Branch string
+}
 
 type CloneOptions struct {
 	Bare       bool
@@ -25,6 +31,8 @@ type GitManager interface {
 	ValidateSSHKey(path string) error
 	HasWorktrees(path string) (bool, error)
 	ListWorktrees(path string) ([]string, error)
+	ListWorktreeDetails(path string) ([]Worktree, error)
+	RemoveWorktree(path, worktreePath string, force bool) error
 }
 
 type gitManager struct{}
@@ -47,6 +55,50 @@ func (g *gitManager) HasWorktrees(path string) (bool, error) {
 		return false, err
 	}
 	return len(worktrees) > 0, nil
+}
+
+func (g *gitManager) RemoveWorktree(path, worktreePath string, force bool) error {
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, worktreePath)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = path
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to remove worktree: %w\n%s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (g *gitManager) ListWorktreeDetails(path string) ([]Worktree, error) {
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = path
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var worktrees []Worktree
+	var current Worktree
+	appendCurrent := func() {
+		if current.Path != "" {
+			worktrees = append(worktrees, current)
+		}
+		current = Worktree{}
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		switch {
+		case line == "":
+			appendCurrent()
+		case strings.HasPrefix(line, "worktree "):
+			current.Path = strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+		case strings.HasPrefix(line, "branch refs/heads/"):
+			current.Branch = strings.TrimSpace(strings.TrimPrefix(line, "branch refs/heads/"))
+		}
+	}
+	appendCurrent()
+	return worktrees, nil
 }
 
 func (g *gitManager) ListWorktrees(path string) ([]string, error) {

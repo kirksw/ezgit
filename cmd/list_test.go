@@ -27,7 +27,7 @@ func TestSortedStringsCopiesAndSorts(t *testing.T) {
 }
 
 func TestAgentCommandsAreRegistered(t *testing.T) {
-	for _, path := range [][]string{{"list", "orgs"}, {"list", "repos"}, {"list", "worktrees"}, {"describe"}, {"clone"}, {"add"}, {"open"}} {
+	for _, path := range [][]string{{"list", "orgs"}, {"list", "repos"}, {"list", "worktrees"}, {"describe"}, {"clone"}, {"add"}, {"open"}, {"skill"}, {"worktree", "add"}, {"worktree", "prune"}} {
 		cmd := rootCmd
 		for _, name := range path {
 			next, _, err := cmd.Find([]string{name})
@@ -36,5 +36,8 @@ func TestAgentCommandsAreRegistered(t *testing.T) {
 			}
 			cmd = next
 		}
+	}
+	if !worktreeCmd.HasAlias("wt") {
+		t.Fatal("worktree command does not register wt alias")
 	}
 }

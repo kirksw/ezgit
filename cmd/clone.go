@@ -47,6 +47,21 @@ type cloneWorktreePlan struct {
 	Custom        []cloneCustomWorktree
 }
 
+func defaultCLICloneWorktreePlan() cloneWorktreePlan {
+	return cloneWorktreePlan{CreateDefault: true}
+}
+
+func cliCloneWorktreePlanFor(defaultBranch, worktreeName string) cloneWorktreePlan {
+	plan := defaultCLICloneWorktreePlan()
+	switch {
+	case worktreeName == "review":
+		plan.CreateReview = true
+	case worktreeName != defaultBranch:
+		plan.Custom = []cloneCustomWorktree{{Name: worktreeName, BaseBranch: defaultBranch}}
+	}
+	return plan
+}
+
 var cloneCmd = &cobra.Command{
 	Use:   "clone <repo> [worktreename]",
 	Short: "Clone a GitHub repository",
@@ -494,8 +509,9 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 			}
 		}
 		interactive := !skipWorktreePrompt && !quiet && isInteractiveStdin()
-		createDefaultWorktree := true
-		createReviewWorktree := true
+		defaultPlan := defaultCLICloneWorktreePlan()
+		createDefaultWorktree := defaultPlan.CreateDefault
+		createReviewWorktree := defaultPlan.CreateReview
 		customWorktrees := make([]cloneCustomWorktree, 0)
 
 		if forcedClonePlan != nil {
@@ -598,8 +614,8 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 
 // runCloneWithWorktree handles `ezgit clone <repo> <worktreename>`.
 // If the repo is already cloned, it just adds the worktree without prompts.
-// If not yet cloned, it clones with default worktrees (default branch + review)
-// plus the specified worktree, all without prompts.
+// If not yet cloned, it creates the default branch and specified worktrees
+// without prompts.
 func runCloneWithWorktree(cfg *config.Config, repoInput string, worktreeName string) error {
 	return runCloneWithWorktreeAndBase(cfg, repoInput, worktreeName, "")
 }

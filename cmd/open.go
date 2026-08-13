@@ -119,10 +119,8 @@ func ensureOpenWorktree(cfg *config.Config, repoFullName, worktreeName string) e
 }
 
 func cloneRepoWithWorktrees(cfg *config.Config, repoFullName, defaultBranch, worktreeName string) error {
-	plan := &cloneWorktreePlan{CreateDefault: true, CreateReview: true}
-	if !isBuiltInWorktree(worktreeName, defaultBranch) {
-		plan.Custom = []cloneCustomWorktree{{Name: worktreeName, BaseBranch: defaultBranch}}
-	}
+	planValue := cliCloneWorktreePlanFor(defaultBranch, worktreeName)
+	plan := &planValue
 
 	originalWorktree := worktree
 	originalSkipPrompt := skipWorktreePrompt
