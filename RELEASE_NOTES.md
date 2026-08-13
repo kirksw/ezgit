@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.0.15 - 2026-08-13
+
+CLI behavior fixes:
+- Kept `ezgit clone --bare` non-interactive by applying the default CLI worktree plan without opening the worktree-selection TUI.
+- Removed the unreachable `connect` command while retaining tmux session support for the root TUI.
+
 ## 0.0.14 - 2026-07-05
 
 Agent-friendly CLI follow-ups:
