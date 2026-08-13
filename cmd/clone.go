@@ -185,7 +185,23 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return runCloneWithWorktree(cfg, args[0], worktreeName)
 	}
 
+	if worktree {
+		return runWithDefaultCLIClonePlan(func() error {
+			return runDirectClone(cfg, args[0], "", 0)
+		})
+	}
+
 	return runDirectClone(cfg, args[0], "", 0)
+}
+
+func runWithDefaultCLIClonePlan(run func() error) error {
+	plan := defaultCLICloneWorktreePlan()
+	originalPlan := forcedClonePlan
+	forcedClonePlan = &plan
+	defer func() {
+		forcedClonePlan = originalPlan
+	}()
+	return run()
 }
 
 func runFuzzyClone(cfg *config.Config, openMode bool) error {

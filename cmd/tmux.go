@@ -6,56 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/kirksw/ezgit/internal/ui"
-	"github.com/spf13/cobra"
 )
-
-var connectCmd = &cobra.Command{
-	Use:   "connect [session]",
-	Short: "Connect to a tmux session",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runConnect,
-}
-
-func init() {
-}
-
-func runConnect(cmd *cobra.Command, args []string) error {
-	session := ""
-	if len(args) > 0 {
-		session = strings.TrimSpace(args[0])
-		if session == "" {
-			return fmt.Errorf("session name cannot be empty")
-		}
-	} else {
-		sessions, err := listTmuxSessions()
-		if err != nil {
-			return err
-		}
-		if len(sessions) == 0 {
-			return fmt.Errorf("no tmux sessions found")
-		}
-
-		if !isInteractiveStdin() {
-			return fmt.Errorf("session name required when not running interactively")
-		}
-
-		selected, cancelled, err := ui.RunTmuxSessionSearch(sessions)
-		if err != nil {
-			return fmt.Errorf("failed to select tmux session: %w", err)
-		}
-		if cancelled {
-			return nil
-		}
-		session = strings.TrimSpace(selected)
-		if session == "" {
-			return nil
-		}
-	}
-
-	return attachTmuxSession(session)
-}
 
 func listTmuxSessions() ([]string, error) {
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")

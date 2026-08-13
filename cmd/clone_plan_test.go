@@ -34,3 +34,27 @@ func TestCLICloneWorktreePlanForFeatureCreatesCustomWorktree(t *testing.T) {
 		t.Fatalf("feature plan custom worktrees = %+v", plan.Custom)
 	}
 }
+
+func TestRunWithDefaultCLIClonePlanBypassesWorktreeSelection(t *testing.T) {
+	originalPlan := forcedClonePlan
+	defer func() {
+		forcedClonePlan = originalPlan
+	}()
+	forcedClonePlan = nil
+
+	if err := runWithDefaultCLIClonePlan(func() error {
+		if forcedClonePlan == nil {
+			t.Fatal("CLI clone plan was not forced")
+		}
+		if !forcedClonePlan.CreateDefault || forcedClonePlan.CreateReview || len(forcedClonePlan.Custom) != 0 {
+			t.Fatalf("forced CLI clone plan = %+v, want default worktree only", *forcedClonePlan)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("runWithDefaultCLIClonePlan() error = %v", err)
+	}
+
+	if forcedClonePlan != nil {
+		t.Fatalf("forced clone plan was not restored: %+v", *forcedClonePlan)
+	}
+}
