@@ -47,7 +47,7 @@ func TestMergeReposByFullName(t *testing.T) {
 	}
 }
 
-func TestRefreshReposIncrementallySkipsFetchWhenCacheFresh(t *testing.T) {
+func TestRefreshReposIncrementallyFetchesWhenCacheFresh(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -73,7 +73,7 @@ func TestRefreshReposIncrementallySkipsFetchWhenCacheFresh(t *testing.T) {
 		},
 		func(createdAfter time.Time) ([]github.Repo, error) {
 			fetchAfterCalls++
-			return nil, errors.New("should not fetch incrementally")
+			return nil, nil
 		},
 	)
 	if err != nil {
@@ -88,8 +88,8 @@ func TestRefreshReposIncrementallySkipsFetchWhenCacheFresh(t *testing.T) {
 	if fetchAllCalls != 0 {
 		t.Fatalf("fetchAllCalls = %d, want 0", fetchAllCalls)
 	}
-	if fetchAfterCalls != 0 {
-		t.Fatalf("fetchAfterCalls = %d, want 0", fetchAfterCalls)
+	if fetchAfterCalls != 1 {
+		t.Fatalf("fetchAfterCalls = %d, want 1", fetchAfterCalls)
 	}
 
 	cacheFile := filepath.Join(home, cache.CacheDir, "acme.json")

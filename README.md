@@ -96,7 +96,7 @@ ezgit skill > SKILL.md            # generate the ezgit agent skill
 
 Cache operations: `refresh`, `list`, `search`, `invalidate`.
 
-Flags (on `cache`): `--force` full refresh regardless of TTL, `--ttl` custom TTL duration (e.g. `24h`).
+Flags (on `cache`): `--force` full refresh (fetch all) instead of incremental update, `--ttl` custom TTL duration (e.g. `24h`).
 
 ## Worktree Layout
 
@@ -193,10 +193,10 @@ open_command = "tmux new-session -A -s \"$repoPath\" -c \"$absPath\""
 
 ## Cache Behavior
 
-- Cache refresh respects TTL by default and skips remote fetches while cache is fresh.
-- `--force` performs a full refresh regardless of TTL.
+- Manual `ezgit cache refresh` always performs an incremental API refresh.
+- `--force` performs a full refresh (fetch all pages) instead of incremental.
 - Use `ezgit cache refresh --ttl <duration>` to set a custom TTL for that refresh run.
-- `ezgit` (no args) and picker-based flows use cached repos immediately when available and refresh stale caches in the background.
+- `ezgit` (no args) and picker-based flows use cached repos immediately when available and refresh stale caches in the background (TTL-aware).
 
 ## Zoxide Integration
 
