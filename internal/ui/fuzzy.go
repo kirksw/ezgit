@@ -2,10 +2,8 @@ package ui
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -20,51 +18,159 @@ const (
 	ActionOpen
 )
 
-type repoDelegate struct{}
+var (
+	stCursor      = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+	stName        = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	stNameActive  = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+	stDesc        = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	stMarkerLocal = lipgloss.NewStyle().Foreground(lipgloss.Color("119"))
+	stMarkerOpen  = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
+	stTitle       = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Bold(true)
+	stMeta        = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	stMuted       = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	stCreate      = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	stPane        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1)
+	stPaneFocused = stPane.Copy().BorderForeground(lipgloss.Color("69"))
+	stPaneTitle   = lipgloss.NewStyle().Foreground(lipgloss.Color("223")).Bold(true)
+)
 
-func (d repoDelegate) Height() int                             { return 2 }
-func (d repoDelegate) Spacing() int                            { return 1 }
-func (d repoDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-func (d repoDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
-	repo, ok := listItem.(repoItem)
-	if !ok {
+// repoListModel is a minimal fixed-height selection list. It renders a
+// window around the cursor so the view never changes size or pages while
+// items are filtered.
+type repoListModel struct {
+	items  []repoItem
+	cursor int
+	offset int
+	rows   int
+	width  int
+}
+
+func (l *repoListModel) SetItems(items []repoItem) {
+	l.items = items
+	l.cursor = 0
+	l.offset = 0
+}
+
+func (l *repoListModel) ResetSelected() {
+	l.cursor = 0
+	l.offset = 0
+}
+
+func (l repoListModel) Items() []repoItem { return l.items }
+
+func (l repoListModel) SelectedItem() (repoItem, bool) {
+	if len(l.items) == 0 || l.cursor < 0 || l.cursor >= len(l.items) {
+		return repoItem{}, false
+	}
+	return l.items[l.cursor], true
+}
+
+func (l *repoListModel) CursorUp() {
+	if len(l.items) == 0 {
 		return
 	}
+	if l.cursor > 0 {
+		l.cursor--
+	} else {
+		l.cursor = len(l.items) - 1
+	}
+	l.scroll()
+}
 
-	localBadgeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("119")).
-		Background(lipgloss.Color("236")).
-		Padding(0, 1)
-	openBadgeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81")).
-		Background(lipgloss.Color("236")).
-		Padding(0, 1)
+func (l *repoListModel) CursorDown() {
+	if len(l.items) == 0 {
+		return
+	}
+	if l.cursor < len(l.items)-1 {
+		l.cursor++
+	} else {
+		l.cursor = 0
+	}
+	l.scroll()
+}
 
-	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	if index == m.Index() {
-		nameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
-		descStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+func (l *repoListModel) scroll() {
+	if l.cursor < l.offset {
+		l.offset = l.cursor
+	}
+	if l.rows > 0 && l.cursor >= l.offset+l.rows {
+		l.offset = l.cursor - l.rows + 1
+	}
+	if l.offset < 0 {
+		l.offset = 0
+	}
+}
+
+func (l repoListModel) View() string {
+	if l.rows <= 0 {
+		return ""
 	}
 
-	badges := make([]string, 0, 2)
-	if repo.IsLocal {
-		badges = append(badges, localBadgeStyle.Render("[local]"))
+	var lines []string
+	if len(l.items) == 0 {
+		lines = append(lines, stMuted.Render("No matches"), "")
+	} else {
+		end := l.offset + l.rows
+		if end > len(l.items) {
+			end = len(l.items)
+		}
+		for i := l.offset; i < end; i++ {
+			lines = append(lines, l.renderRow(l.items[i], i == l.cursor)...)
+		}
 	}
-	if repo.IsOpen {
-		badges = append(badges, openBadgeStyle.Render("[open]"))
+	for len(lines) < l.rows*2 {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (l repoListModel) renderRow(item repoItem, selected bool) []string {
+	cursor := "  "
+	name := stName.Render(item.Owner + "/" + item.Name)
+	if selected {
+		cursor = stCursor.Render("❯ ")
+		name = stNameActive.Render(item.Owner + "/" + item.Name)
 	}
 
-	line := nameStyle.Render(fmt.Sprintf("%s/%s", repo.Owner, repo.Name))
-	if len(badges) > 0 {
-		line = strings.Join(badges, " ") + " " + line
+	var markers []string
+	if item.IsLocal {
+		markers = append(markers, stMarkerLocal.Render("local"))
+	}
+	if item.IsOpen {
+		markers = append(markers, stMarkerOpen.Render("open"))
 	}
 
-	if repo.Description != "" {
-		line += fmt.Sprintf("\n  %s", descStyle.Render(truncateString(repo.Description, 60)))
+	first := cursor + name
+	if len(markers) > 0 {
+		right := strings.Join(markers, " ")
+		contentWidth := l.width - 4
+		if pad := contentWidth - lipgloss.Width(name) - lipgloss.Width(right); pad >= 1 {
+			first += strings.Repeat(" ", pad) + right
+		} else {
+			first += " " + right
+		}
 	}
 
-	fmt.Fprint(w, line)
+	maxDesc := l.width - 8
+	if maxDesc < 8 {
+		maxDesc = 8
+	}
+	second := "  " + stDesc.Render(truncateRunes(item.Description, maxDesc))
+	return []string{first, second}
+}
+
+func truncateRunes(s string, maxLen int) string {
+	if maxLen <= 1 {
+		if s == "" {
+			return ""
+		}
+		return "…"
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen-1]) + "…"
 }
 
 type repoItem struct {
@@ -108,7 +214,7 @@ const (
 
 type model struct {
 	searchableRepos    []searchableRepo
-	repoList           list.Model
+	repoList           repoListModel
 	textinput          textinput.Model
 	quitting           bool
 	selected           *github.Repo
@@ -175,17 +281,13 @@ func newModelWithControls(
 ) model {
 	ti := textinput.New()
 	ti.Placeholder = "Search repos..."
+	ti.Prompt = "❯ "
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
 	ti.Focus()
 	ti.CharLimit = 156
-	ti.Width = 80
+	ti.Width = 60
 
-	l := list.New(nil, repoDelegate{}, 0, 0)
-	l.SetShowStatusBar(false)
-	l.SetShowHelp(false)
-	l.SetShowTitle(false)
-	l.SetShowPagination(false)
-	l.SetWidth(80)
-	l.SetHeight(12)
+	l := repoListModel{rows: 8, width: 76}
 
 	m := model{
 		searchableRepos:   buildSearchableRepos(repos),
@@ -204,7 +306,7 @@ func newModelWithControls(
 		currentPage:       pageMain,
 		settingsIndex:     0,
 		width:             80,
-		height:            20,
+		height:            24,
 		allowLocalToggle:  allowLocalToggle,
 		allowSettingsPage: allowSettingsPage,
 	}
@@ -287,11 +389,9 @@ func (m *model) cycleFilter() {
 }
 
 func (m model) selectedRepoFromList() *github.Repo {
-	if item := m.repoList.SelectedItem(); item != nil {
-		if ri, ok := item.(repoItem); ok {
-			repo := ri.Repo
-			return &repo
-		}
+	if item, ok := m.repoList.SelectedItem(); ok {
+		repo := item.Repo
+		return &repo
 	}
 	return nil
 }
@@ -342,16 +442,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				listWidth = msg.Width
 			}
 		}
-		m.repoList.SetWidth(listWidth)
-		reservedLines := 14
-		if m.openMode {
-			reservedLines = 16
-		}
+		reservedLines := 12
 		listHeight := msg.Height - reservedLines
 		if listHeight < 4 {
 			listHeight = 4
 		}
-		m.repoList.SetHeight(listHeight)
+		m.repoList.rows = listHeight / 2
 		m.textinput.Width = msg.Width - 4
 		m.worktreeInput.Width = listWidth - 4
 		if m.worktreeInput.Width < 20 {
@@ -426,15 +522,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				}
 
-				if len(m.repoList.Items()) > 0 {
-					if item := m.repoList.SelectedItem(); item != nil {
-						if ri, ok := item.(repoItem); ok {
-							m.selected = &ri.Repo
-							m.selectedWorktree = ""
-							m.quitting = true
-							return m, tea.Quit
-						}
-					}
+				if item, ok := m.repoList.SelectedItem(); ok {
+					m.selected = &item.Repo
+					m.selectedWorktree = ""
+					m.quitting = true
+					return m, tea.Quit
 				}
 
 			case tea.KeyTab:
@@ -577,47 +669,22 @@ func (m model) View() string {
 }
 
 func (m model) renderMainPage() string {
-	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("229")).
-		Bold(true)
-
-	searchBoxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1)
-
-	paneStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1)
-
-	focusedPaneStyle := paneStyle.Copy().
-		BorderForeground(lipgloss.Color("69"))
-
-	paneTitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("223")).
-		Bold(true)
-
-	mutedTextStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241"))
-
 	var b strings.Builder
 
-	titleText := "Select a repository"
+	titleText := "Select a repository to clone"
 	if m.openMode || m.localOnly {
 		titleText = "Select a repository to open"
-	} else {
-		titleText = "Select a repository to clone"
 	}
-	b.WriteString(headerStyle.Render(titleText))
-
+	repoWord := "repos"
+	if len(m.repoList.items) == 1 {
+		repoWord = "repo"
+	}
+	b.WriteString(stTitle.Render(titleText))
+	b.WriteString("  ")
+	b.WriteString(stMeta.Render(fmt.Sprintf("%d %s · %s", len(m.repoList.items), repoWord, m.currentFilterLabel())))
 	b.WriteString("\n\n")
 
-	searchWidth := m.width - 2
-	if searchWidth < 24 {
-		searchWidth = 24
-	}
-	b.WriteString(searchBoxStyle.Width(searchWidth).Render(m.textinput.View()))
+	b.WriteString(m.textinput.View())
 	b.WriteString("\n\n")
 
 	if m.openMode {
@@ -631,130 +698,150 @@ func (m model) renderMainPage() string {
 			leftWidth = m.width
 		}
 
-		leftContent := mutedTextStyle.Render("No repos found")
-		if len(m.repoList.Items()) > 0 {
-			leftContent = m.repoList.View()
-		}
-
-		leftPane := paneStyle
+		leftPane := stPane
 		if !m.focusWorktreePane {
-			leftPane = focusedPaneStyle
+			leftPane = stPaneFocused
 		}
-		leftPaneContent := paneTitleStyle.Render("Repositories ["+strings.ToUpper(m.currentFilterLabel())+"]") + "\n\n" + leftContent
+		m.repoList.width = leftWidth - 4
+		if m.repoList.width < 20 {
+			m.repoList.width = 20
+		}
+		leftPaneContent := stPaneTitle.Render("Repositories") + "\n" + m.repoList.View()
 		leftRendered := leftPane.Width(leftWidth - 1).Render(leftPaneContent)
 
 		if rightWidth > 0 {
-			rightPane := paneStyle
+			rightPane := stPane
 			if m.focusWorktreePane {
-				rightPane = focusedPaneStyle
+				rightPane = stPaneFocused
 			}
-
-			rightNormal := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-			rightSelected := lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
-			rightCreate := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-			rightOpenBadge := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("81")).
-				Background(lipgloss.Color("236")).
-				Padding(0, 1)
-			rightMuted := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-
-			var right strings.Builder
-			repo := m.selectedRepoFromList()
-			right.WriteString(paneTitleStyle.Render("Worktrees"))
-			right.WriteString("\n\n")
-			if repo == nil {
-				right.WriteString(rightMuted.Render("Select a repository to view worktrees"))
-			} else {
-				options := m.worktreeOptionsForRepo(repo)
-				if len(options) == 1 && options[0] == "+ Create new worktree" {
-					right.WriteString(rightMuted.Render("No worktrees yet"))
-					right.WriteString("\n\n")
-				}
-				idx := m.worktreeSelection[repo.FullName]
-				if idx < 0 || idx >= len(options) {
-					idx = 0
-				}
-				for i, option := range options {
-					isSelected := m.focusWorktreePane && i == idx
-					isCreate := option == "+ Create new worktree"
-					label := option
-					if !isCreate {
-						if openedByRepo, ok := m.openedWorktrees[repo.FullName]; ok {
-							if openedByRepo[option] {
-								label = option + " " + rightOpenBadge.Render("[open]")
-							}
-						}
-					}
-
-					line := "  " + label
-					if isSelected {
-						right.WriteString(rightSelected.Render(line))
-					} else if isCreate {
-						right.WriteString(rightCreate.Render(line))
-					} else {
-						right.WriteString(rightNormal.Render(line))
-					}
-					right.WriteString("\n\n")
-				}
-				if m.creatingWorktree {
-					right.WriteString("\n")
-					right.WriteString(rightMuted.Render("Create inline: name[:base]"))
-					right.WriteString("\n")
-					right.WriteString(m.worktreeInput.View())
-					if strings.TrimSpace(m.worktreeInputHint) != "" {
-						right.WriteString("\n")
-						right.WriteString(rightMuted.Render(m.worktreeInputHint))
-					}
-				}
+			rightContent := m.renderWorktreePane()
+			// Pin the pane content to the same height as the repo pane so the
+			// layout never shifts when the selection or worktree count changes.
+			targetLines := 1 + m.repoList.rows*2
+			if deficit := targetLines - lipgloss.Height(rightContent); deficit > 0 {
+				rightContent += strings.Repeat("\n", deficit)
 			}
-
-			rightRendered := rightPane.Width(rightWidth - 1).Render(right.String())
+			rightRendered := rightPane.Width(rightWidth - 1).Render(rightContent)
 			b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, rightRendered))
 		} else {
 			b.WriteString(leftRendered)
 		}
 	} else {
-		body := mutedTextStyle.Render("No repos found")
-		if len(m.repoList.Items()) > 0 {
-			body = m.repoList.View()
+		m.repoList.width = m.width - 2
+		if m.repoList.width < 20 {
+			m.repoList.width = 20
 		}
-		panelWidth := m.width - 1
-		if panelWidth < 40 {
-			panelWidth = 40
-		}
-		b.WriteString(paneStyle.Width(panelWidth).Render(paneTitleStyle.Render("Repositories ["+strings.ToUpper(m.currentFilterLabel())+"]") + "\n\n" + body))
+		b.WriteString(m.repoList.View())
 	}
 
-	keybinds := []string{"scope: " + strings.ToUpper(m.currentFilterLabel()), "↑/↓ move"}
-	if m.allowLocalToggle {
-		keybinds = append([]string{"tab: scope"}, keybinds...)
+	b.WriteString("\n")
+	b.WriteString(stMeta.Render(m.footerKeys()))
+	return b.String()
+}
+
+func (m model) footerKeys() string {
+	if m.creatingWorktree {
+		return strings.Join([]string{"enter create", "esc cancel"}, "  ·  ")
 	}
+	keys := []string{"↑/↓ move"}
+	if m.allowLocalToggle {
+		keys = append(keys, "tab scope")
+	}
+	keys = append(keys, "enter "+m.enterVerb())
 	if m.openMode {
-		keybinds = append(keybinds, "←/→ pane")
+		keys = append(keys, "←/→ pane")
+	}
+	keys = append(keys, "esc cancel")
+	return strings.Join(keys, "  ·  ")
+}
+
+func (m model) enterVerb() string {
+	if m.openMode && m.focusWorktreePane {
+		return "open worktree"
 	}
 	if m.creatingWorktree {
-		keybinds = append(keybinds, "name[:base]", "enter create")
-	} else if m.openMode && m.focusWorktreePane {
-		keybinds = append(keybinds, "enter open/create")
-	} else if m.openMode || m.localOnly {
-		keybinds = append(keybinds, "enter open")
-	} else {
-		keybinds = append(keybinds, "enter clone")
+		return "create"
 	}
-	keybinds = append(keybinds, "esc cancel")
-
-	keybindBoxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Foreground(lipgloss.Color("245")).
-		Padding(0, 1)
-
-	b.WriteString("\n\n")
-	keybindWidth := m.width - 1
-	if keybindWidth < 40 {
-		keybindWidth = 40
+	if m.openMode || m.localOnly {
+		return "open"
 	}
-	b.WriteString(keybindBoxStyle.Width(keybindWidth).Render(strings.Join(keybinds, "  |  ")))
+	return "clone"
+}
+
+func (m model) renderWorktreePane() string {
+	var b strings.Builder
+	b.WriteString(stPaneTitle.Render("Worktrees"))
+	b.WriteString("\n")
+
+	repo := m.selectedRepoFromList()
+	if repo == nil {
+		b.WriteString(stMuted.Render("Select a repository"))
+		return b.String()
+	}
+
+	options := m.worktreeOptionsForRepo(repo)
+	if len(options) == 1 && options[0] == "+ Create new worktree" {
+		b.WriteString(stMuted.Render("No worktrees"))
+		b.WriteString("\n\n")
+	}
+
+	idx := m.worktreeSelection[repo.FullName]
+	if idx < 0 || idx >= len(options) {
+		idx = 0
+	}
+
+	maxVisible := 8
+	start, end := featurePromptVisibleRange(len(options), idx, min(maxVisible, len(options)))
+	for i := start; i < end; i++ {
+		option := options[i]
+		isSelected := m.focusWorktreePane && i == idx
+		isCreate := option == "+ Create new worktree"
+
+		var line string
+		if isCreate {
+			label := "+ new worktree"
+			if isSelected {
+				line = stCursor.Render("❯ ") + stCreate.Render(label)
+			} else {
+				line = "  " + stCreate.Render(label)
+			}
+		} else {
+			label := option
+			if openedByRepo, ok := m.openedWorktrees[repo.FullName]; ok && openedByRepo[option] {
+				label = option + " " + stMarkerOpen.Render("· open")
+			}
+			if isSelected {
+				line = stCursor.Render("❯ ") + stNameActive.Render(label)
+			} else {
+				line = "  " + stName.Render(label)
+			}
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	if len(options) > maxVisible {
+		b.WriteString("\n")
+		if start > 0 {
+			b.WriteString(stMuted.Render(fmt.Sprintf("  ↑ %d more", start)))
+			b.WriteString("\n")
+		}
+		if end < len(options) {
+			b.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(options)-end)))
+			b.WriteString("\n")
+		}
+	}
+
+	if m.creatingWorktree {
+		b.WriteString("\n")
+		b.WriteString(m.worktreeInput.View())
+		b.WriteString("\n")
+		b.WriteString(stMuted.Render("name[:base]"))
+		if strings.TrimSpace(m.worktreeInputHint) != "" {
+			b.WriteString("  ")
+			b.WriteString(stMuted.Render(m.worktreeInputHint))
+		}
+	}
 
 	return b.String()
 }
@@ -878,9 +965,9 @@ func (m model) renderWorktreesPage() string {
 	return b.String()
 }
 
-func (m model) filterRepos(query string) []list.Item {
+func (m model) filterRepos(query string) []repoItem {
 	query = strings.ToLower(query)
-	var items []list.Item
+	var items []repoItem
 	for _, searchable := range m.searchableRepos {
 		repo := searchable.repo
 		switch m.filterIndex {
@@ -912,7 +999,6 @@ func (m model) filterRepos(query string) []list.Item {
 	}
 	return items
 }
-
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
