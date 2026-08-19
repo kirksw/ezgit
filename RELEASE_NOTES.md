@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.0.17 - 2026-08-19
+
+Default-branch worktree selection:
+- Opening a repo without a worktree now opens the default-branch worktree (`main`/`master`, falling back to the first worktree) for repos using the worktree layout; regular clones still open the repo root.
+- The TUI worktree pane preselects the default-branch worktree.
+- Removed the forced standalone worktree-selection prompt on `ezgit open <repo>` now that the default resolves automatically.
+- Explicit worktree selection (CLI argument or TUI worktree pane) still takes precedence.
+
 ## 0.0.16 - 2026-08-19
 
 TUI picker redesign:
