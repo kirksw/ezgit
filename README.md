@@ -57,7 +57,7 @@ No-arg picker shortcuts:
 - `left/right`: switch focus between repo list and worktree pane.
 - `enter` in repo pane: open repo root.
 - `enter` in worktree pane: open selected worktree (repo root is intentionally hidden there).
-- `enter` on `+ Create new worktree`: inline create mode (`name[:base]`) and create+open on confirm.
+- `enter` on `+ new worktree`: inline create mode (`name[:base]`) and create+open on confirm.
 - `esc` / `ctrl+c`: cancel.
 
 Flags: `--no-open`, `-b` branch, `--depth` shallow clone depth, `-q` quiet, `--key-path` SSH key, `-d` destination directory, `--feature`, `--feature-base`.

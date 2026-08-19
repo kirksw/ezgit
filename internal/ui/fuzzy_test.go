@@ -37,7 +37,7 @@ func TestTabCyclesAllLocalOpenedFilters(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item when localOnly=true, got %d", len(items))
 	}
-	ri := items[0].(repoItem)
+	ri := items[0]
 	if ri.FullName != "org/foo" {
 		t.Fatalf("expected org/foo, got %s", ri.FullName)
 	}
@@ -54,7 +54,7 @@ func TestTabCyclesAllLocalOpenedFilters(t *testing.T) {
 	if len(m.repoList.Items()) != 1 {
 		t.Fatalf("expected 1 item for opened filter, got %d", len(m.repoList.Items()))
 	}
-	ri = m.repoList.Items()[0].(repoItem)
+	ri = m.repoList.Items()[0]
 	if ri.FullName != "org/bar" {
 		t.Fatalf("expected opened repo org/bar, got %s", ri.FullName)
 	}
@@ -361,7 +361,8 @@ func TestOpenModeViewShowsOpenedWorktreeHighlight(t *testing.T) {
 	m.openedWorktrees[repo.FullName] = map[string]bool{"main": true}
 
 	view := m.View()
-	if !strings.Contains(view, "main") || !strings.Contains(view, "[open]") {
+
+	if !strings.Contains(view, "main") || !strings.Contains(view, "· open") {
 		t.Fatalf("view missing open marker, got: %q", view)
 	}
 }
@@ -371,13 +372,10 @@ func TestMainViewShowsScopeAndTabKeybind(t *testing.T) {
 	m := newModel([]github.Repo{repo}, false, map[string]bool{"org/foo": true}, true)
 	view := m.View()
 
-	if !strings.Contains(view, "Repositories [ALL]") {
-		t.Fatalf("view missing scope in pane title, got: %q", view)
+	if !strings.Contains(view, "1 repo · all") {
+		t.Fatalf("view missing count and scope in header, got: %q", view)
 	}
-	if !strings.Contains(view, "scope: ALL") {
-		t.Fatalf("view missing scope in keybind box, got: %q", view)
-	}
-	if !strings.Contains(view, "tab: scope") {
+	if !strings.Contains(view, "tab scope") {
 		t.Fatalf("view missing tab keybind, got: %q", view)
 	}
 }
@@ -392,10 +390,7 @@ func TestRepoListReflectsOpenedReposAfterRefresh(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("len(items)=%d, want 1", len(items))
 	}
-	ri, ok := items[0].(repoItem)
-	if !ok {
-		t.Fatalf("unexpected item type %T", items[0])
-	}
+	ri := items[0]
 	if !ri.IsOpen {
 		t.Fatal("expected repo to be marked open after refresh")
 	}
