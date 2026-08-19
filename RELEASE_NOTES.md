@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.0.16 - 2026-08-19
+
+TUI picker redesign:
+- Replaced the paged repo list with fzf-style scrolling so the cursor moves smoothly without page swaps.
+- Kept every layout region at a fixed height; typing a filter no longer shifts the UI, including zero-match states.
+- Decluttered the picker: borderless search prompt, live repo count and scope in the header, single-line footer, and right-aligned `local`/`open` markers instead of badge chips.
+- Tightened the open-mode worktree pane: single-spaced windowed rows, `+ new worktree` inline create, and pane heights pinned so borders never move.
+
 ## 0.0.15 - 2026-08-13
 
 CLI behavior fixes:
