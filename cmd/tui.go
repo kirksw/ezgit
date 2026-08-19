@@ -89,7 +89,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			repoPath := getRepoPath(cfg, result.Repo.FullName, false, result.Repo.DefaultBranch)
 			return runConvertPath(repoPath, result.Repo.DefaultBranch)
 		}
-		return runOpenRepoSelection(cfg, result.Repo, localOnly, localRepos, "")
+		return runOpenRepoSelection(cfg, result.Repo, "")
 	case ui.HubModeConnect:
 		if result.Session == "" {
 			if sessionErr != nil {

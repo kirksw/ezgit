@@ -209,7 +209,6 @@ type page int
 const (
 	pageMain page = iota
 	pageSettings
-	pageWorktrees
 )
 
 type model struct {
@@ -238,8 +237,6 @@ type model struct {
 	createWorktreeBase string
 	currentPage        page
 	settingsIndex      int
-	worktrees          []string
-	worktreeIndex      int
 	width              int
 	height             int
 	lastInput          string
@@ -368,6 +365,38 @@ func (m *model) ensureRepoWorktreesLoaded(repo *github.Repo) {
 
 func (m *model) ensureSelectedRepoWorktreesLoaded() {
 	m.ensureRepoWorktreesLoaded(m.selectedRepoFromList())
+}
+
+// defaultWorktreeIndex finds the default-branch worktree in options, falling
+// back to main, then master, then the first option.
+func defaultWorktreeIndex(options []string, defaultBranch string) int {
+	prefer := make([]string, 0, 3)
+	if b := strings.TrimSpace(defaultBranch); b != "" {
+		prefer = append(prefer, b)
+	}
+	prefer = append(prefer, "main", "master")
+	for _, branch := range prefer {
+		for i, opt := range options {
+			if opt == branch {
+				return i
+			}
+		}
+	}
+	return 0
+}
+
+// worktreeCursor returns the selected worktree index for a repo, seeding it
+// to the default branch when unset or out of bounds.
+func (m *model) worktreeCursor(repo *github.Repo, options []string) int {
+	if len(options) == 0 {
+		return 0
+	}
+	if idx, ok := m.worktreeSelection[repo.FullName]; ok && idx >= 0 && idx < len(options) {
+		return idx
+	}
+	idx := defaultWorktreeIndex(options, repo.DefaultBranch)
+	m.worktreeSelection[repo.FullName] = idx
+	return idx
 }
 
 func (m model) currentFilterLabel() string {
@@ -503,10 +532,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					}
 					options := m.worktreeOptionsForRepo(repo)
-					idx := m.worktreeSelection[repo.FullName]
-					if idx < 0 || idx >= len(options) {
-						idx = 0
-					}
+					idx := m.worktreeCursor(repo, options)
 					selected := options[idx]
 					if selected == "+ Create new worktree" {
 						m.creatingWorktree = true
@@ -542,9 +568,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					repo := m.selectedRepoFromList()
 					if repo != nil {
 						options := m.worktreeOptionsForRepo(repo)
-						idx := m.worktreeSelection[repo.FullName]
-						idx = (idx + 1) % len(options)
-						m.worktreeSelection[repo.FullName] = idx
+						idx := m.worktreeCursor(repo, options)
+						m.worktreeSelection[repo.FullName] = (idx + 1) % len(options)
 					}
 				} else {
 					m.repoList.CursorDown()
@@ -555,9 +580,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					repo := m.selectedRepoFromList()
 					if repo != nil {
 						options := m.worktreeOptionsForRepo(repo)
-						idx := m.worktreeSelection[repo.FullName]
-						idx = (idx - 1 + len(options)) % len(options)
-						m.worktreeSelection[repo.FullName] = idx
+						idx := m.worktreeCursor(repo, options)
+						m.worktreeSelection[repo.FullName] = (idx - 1 + len(options)) % len(options)
 					}
 				} else {
 					m.repoList.CursorUp()
@@ -582,23 +606,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.currentPage = pageSettings
 				return m, nil
-			}
-		} else if m.currentPage == pageWorktrees {
-			switch msg.Type {
-			case tea.KeyEsc:
-				m.currentPage = pageMain
-				m.selected = nil
-				return m, nil
-
-			case tea.KeyEnter:
-				m.quitting = true
-				return m, tea.Quit
-
-			case tea.KeyDown, tea.KeyCtrlN:
-				m.worktreeIndex = (m.worktreeIndex + 1) % len(m.worktrees)
-
-			case tea.KeyUp, tea.KeyCtrlP:
-				m.worktreeIndex = (m.worktreeIndex - 1 + len(m.worktrees)) % len(m.worktrees)
 			}
 		} else {
 			switch msg.Type {
@@ -661,8 +668,6 @@ func (m model) View() string {
 	switch m.currentPage {
 	case pageSettings:
 		return m.renderSettingsPage()
-	case pageWorktrees:
-		return m.renderWorktreesPage()
 	default:
 		return m.renderMainPage()
 	}
@@ -785,10 +790,7 @@ func (m model) renderWorktreePane() string {
 		b.WriteString("\n\n")
 	}
 
-	idx := m.worktreeSelection[repo.FullName]
-	if idx < 0 || idx >= len(options) {
-		idx = 0
-	}
+	idx := m.worktreeCursor(repo, options)
 
 	maxVisible := 8
 	start, end := featurePromptVisibleRange(len(options), idx, min(maxVisible, len(options)))
@@ -908,58 +910,6 @@ func (m model) renderSettingsPage() string {
 	instructions = append(instructions, "space: toggle option")
 	instructions = append(instructions, "enter/ctrl+s: back to repos")
 	instructions = append(instructions, "esc: cancel")
-	b.WriteString(instructionStyle.Render(strings.Join(instructions, " | ")))
-
-	return b.String()
-}
-
-func (m model) renderWorktreesPage() string {
-	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("228")).
-		Bold(true)
-
-	repoStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("147")).
-		Italic(true)
-
-	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		Italic(true)
-
-	cursorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
-		Bold(true)
-
-	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
-
-	var b strings.Builder
-
-	b.WriteString(headerStyle.Render("Select worktree"))
-	b.WriteString("\n")
-
-	if m.selected != nil {
-		b.WriteString(repoStyle.Render("  " + m.selected.FullName))
-		b.WriteString("\n\n")
-	}
-
-	for i, wt := range m.worktrees {
-		prefix := "  "
-		if i == m.worktreeIndex {
-			prefix = cursorStyle.Render("▶ ")
-		}
-
-		b.WriteString(prefix)
-		b.WriteString(normalStyle.Render(wt))
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n\n")
-
-	var instructions []string
-	instructions = append(instructions, "up/down: navigate")
-	instructions = append(instructions, "enter: confirm")
-	instructions = append(instructions, "esc: back")
 	b.WriteString(instructionStyle.Render(strings.Join(instructions, " | ")))
 
 	return b.String()
@@ -1592,52 +1542,6 @@ func RunCloneWorktreeOptionsPrompt(defaultBranch string) (createDefault bool, cr
 	return plan.CreateDefault, plan.CreateReview, len(plan.Custom) > 0, false, nil
 }
 
-// RunFuzzySearch launches the fuzzy repo picker and returns the selected repo
-// along with user-selected options like worktree mode and action.
-func RunWorktreeSelection(repos []github.Repo, selectedRepo *github.Repo, worktree bool, localRepos map[string]bool, worktrees []string) (*FuzzySearchResult, error) {
-	m := newModel(repos, worktree, localRepos, true)
-	m.selected = selectedRepo
-	m.worktrees = worktrees
-	m.worktreeIndex = 0
-	m.currentPage = pageWorktrees
-
-	p := tea.NewProgram(
-		m,
-		tea.WithAltScreen(),
-	)
-
-	finalModel, err := p.Run()
-	if err != nil {
-		return nil, fmt.Errorf("failed to run worktree selection: %w", err)
-	}
-
-	model, ok := finalModel.(model)
-	if !ok {
-		return nil, fmt.Errorf("unexpected model type")
-	}
-
-	if model.selected != nil {
-		var selectedWorktree string
-		if len(model.worktrees) > 0 && model.worktreeIndex < len(model.worktrees) {
-			selectedWorktree = model.worktrees[model.worktreeIndex]
-		}
-
-		return &FuzzySearchResult{
-			Repo:             model.selected,
-			Worktree:         model.worktree,
-			Action:           ActionOpen,
-			SelectedWorktree: selectedWorktree,
-		}, nil
-	}
-
-	return &FuzzySearchResult{
-		Repo:             nil,
-		Worktree:         model.worktree,
-		Action:           ActionOpen,
-		SelectedWorktree: "",
-	}, nil
-}
-
 func RunFuzzySearch(repos []github.Repo, worktree bool, localRepos map[string]bool, openMode bool) (*FuzzySearchResult, error) {
 	p := tea.NewProgram(
 		newModel(repos, worktree, localRepos, openMode),
@@ -1660,16 +1564,11 @@ func RunFuzzySearch(repos []github.Repo, worktree bool, localRepos map[string]bo
 			action = ActionOpen
 		}
 
-		var selectedWorktree string
-		if len(m.worktrees) > 0 && m.worktreeIndex < len(m.worktrees) {
-			selectedWorktree = m.worktrees[m.worktreeIndex]
-		}
-
 		return &FuzzySearchResult{
 			Repo:             m.selected,
 			Worktree:         m.worktree,
 			Action:           action,
-			SelectedWorktree: selectedWorktree,
+			SelectedWorktree: "",
 		}, nil
 	}
 

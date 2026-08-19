@@ -14,8 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const createNewWorktreeOption = "+ Create new worktree"
-
 var openCmd = &cobra.Command{
 	Use:   "open <repo> [worktree-name]",
 	Short: "Open a locally cloned repository with the configured open command",
@@ -162,6 +160,15 @@ func isBuiltInWorktree(worktreeName, defaultBranch string) bool {
 	return worktreeName == defaultBranch || worktreeName == "review"
 }
 
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func runSeshConnect(absPath string) error {
 	cmd := exec.Command("sesh", "connect", absPath)
 	cmd.Stdin = os.Stdin
@@ -173,120 +180,12 @@ func runSeshConnect(absPath string) error {
 	return nil
 }
 
-func runOpenRepoSelection(
-	cfg *config.Config,
-	repo *github.Repo,
-	localOnly []github.Repo,
-	localRepos map[string]bool,
-	selectedWorktree string,
-) error {
+func runOpenRepoSelection(cfg *config.Config, repo *github.Repo, selectedWorktree string) error {
 	if repo == nil {
 		return nil
 	}
 
-	repoPath := getRepoPath(cfg, repo.FullName, false, repo.DefaultBranch)
-
-	gitMgr := git.New()
-	selectedWorktree, cancelled, err := selectOrCreateWorktreeForOpen(gitMgr, repoPath, repo, localOnly, localRepos, selectedWorktree)
-	if err != nil {
-		return err
-	}
-	if cancelled {
-		return nil
-	}
-
 	return runOpenCommand(cfg, repo.FullName, selectedWorktree)
-}
-
-func selectOrCreateWorktreeForOpen(
-	gitMgr git.GitManager,
-	repoPath string,
-	repo *github.Repo,
-	localOnly []github.Repo,
-	localRepos map[string]bool,
-	selectedWorktree string,
-) (string, bool, error) {
-	if strings.TrimSpace(selectedWorktree) != "" {
-		return selectedWorktree, false, nil
-	}
-
-	worktrees, err := gitMgr.ListWorktrees(repoPath)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to list worktrees: %w", err)
-	}
-	if len(worktrees) == 0 {
-		return "", false, nil
-	}
-	selectionOptions := withCreateWorktreeOption(worktrees)
-	for {
-		result, err := ui.RunWorktreeSelection(localOnly, repo, false, localRepos, selectionOptions)
-		if err != nil {
-			return "", false, err
-		}
-		if result.Repo == nil {
-			return "", true, nil
-		}
-		if !isCreateWorktreeOption(result.SelectedWorktree) {
-			return result.SelectedWorktree, false, nil
-		}
-
-		branches, err := gitMgr.ListBranches(repoPath)
-		if err != nil {
-			return "", false, fmt.Errorf("failed to list branches for new worktree: %w", err)
-		}
-
-		defaultBranch := strings.TrimSpace(repo.DefaultBranch)
-		if defaultBranch == "" {
-			defaultBranch = "main"
-		}
-
-		featureBranch, baseBranch, cancelled, err := ui.RunCreateWorktreePrompt(branches, defaultBranch)
-		if err != nil {
-			return "", false, fmt.Errorf("failed to configure new worktree: %w", err)
-		}
-		if cancelled {
-			return "", true, nil
-		}
-
-		featureBranch = strings.TrimSpace(featureBranch)
-		baseBranch = strings.TrimSpace(baseBranch)
-		if featureBranch == "" {
-			continue
-		}
-		if containsString(worktrees, featureBranch) {
-			return "", false, fmt.Errorf("worktree %q already exists", featureBranch)
-		}
-		if baseBranch == "" {
-			baseBranch = defaultBranch
-		}
-
-		worktreePath := filepath.Join(repoPath, featureBranch)
-		if err := gitMgr.CreateFeatureWorktree(repoPath, worktreePath, featureBranch, baseBranch); err != nil {
-			return "", false, fmt.Errorf("failed to create worktree %q from %q: %w", featureBranch, baseBranch, err)
-		}
-
-		return featureBranch, false, nil
-	}
-}
-
-func withCreateWorktreeOption(worktrees []string) []string {
-	options := make([]string, 0, len(worktrees)+1)
-	options = append(options, worktrees...)
-	options = append(options, createNewWorktreeOption)
-	return options
-}
-
-func isCreateWorktreeOption(value string) bool {
-	return strings.TrimSpace(value) == createNewWorktreeOption
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func getRepoPath(cfg *config.Config, repoFullName string, isWorktree bool, defaultBranch string) string {

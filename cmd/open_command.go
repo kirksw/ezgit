@@ -45,12 +45,20 @@ func buildOpenCommandContext(cfg *config.Config, repoFullName string, selectedWo
 	repo := strings.TrimSpace(parts[1])
 	worktree := strings.TrimSpace(selectedWorktree)
 	orgRepo := filepath.ToSlash(filepath.Join(org, repo))
+	repoRootPath := filepath.Join(cloneDir, org, repo)
+
+	if worktree == "" {
+		// The worktree layout keeps only git metadata at the repo root, so
+		// opening it directly is not useful. Fall back to the default-branch
+		// worktree when the user did not pick one.
+		worktree = resolveDefaultBranchWorktree(repoFullName, repoRootPath)
+	}
+
 	repoPath := orgRepo
 	if worktree != "" {
 		repoPath = filepath.ToSlash(filepath.Join(orgRepo, worktree))
 	}
 
-	repoRootPath := filepath.Join(cloneDir, org, repo)
 	absPath := resolveOpenTargetPath(repoRootPath, worktree)
 
 	return openCommandContext{
@@ -62,6 +70,45 @@ func buildOpenCommandContext(cfg *config.Config, repoFullName string, selectedWo
 		OrgRepo:      orgRepo,
 		RepoFullName: repoFullName,
 	}, nil
+}
+
+// resolveDefaultBranchWorktree returns the worktree directory name to open
+// when the user did not select one. Repos using the worktree layout store
+// only git metadata at the root, so the default-branch worktree is opened
+// instead. Regular clones and missing repos return "" (repo root is opened).
+func resolveDefaultBranchWorktree(repoFullName, repoRootPath string) string {
+	state, err := detectExistingRepoState(repoRootPath)
+	if err != nil || state != existingRepoWorktree {
+		return ""
+	}
+
+	defaultBranch := resolveDefaultBranch(repoFullName, "")
+	candidates := make([]string, 0, 3)
+	for _, branch := range []string{defaultBranch, "main", "master"} {
+		if branch == "" {
+			continue
+		}
+		candidates = append(candidates, branch)
+	}
+
+	for _, branch := range candidates {
+		if info, err := os.Stat(filepath.Join(repoRootPath, branch)); err == nil && info.IsDir() {
+			return branch
+		}
+	}
+
+	// Fallback: first worktree-shaped subdirectory.
+	entries, err := os.ReadDir(repoRootPath)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == ".git" {
+			continue
+		}
+		return entry.Name()
+	}
+	return ""
 }
 
 func runOpenCommand(cfg *config.Config, repoFullName string, selectedWorktree string) error {

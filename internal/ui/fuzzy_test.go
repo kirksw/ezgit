@@ -432,31 +432,6 @@ func TestNewCloneWorktreeOptionsModelDefaults(t *testing.T) {
 	}
 }
 
-func TestCtrlCCancelsFromWorktreePage(t *testing.T) {
-	repos := []github.Repo{
-		{Name: "foo", FullName: "org/foo"},
-	}
-	localRepos := map[string]bool{"org/foo": true}
-
-	selected := repos[0]
-	m := newModel(repos, false, localRepos, true)
-	m.currentPage = pageWorktrees
-	m.selected = &selected
-	m.worktrees = []string{"main", "review"}
-	m.worktreeIndex = 0
-
-	ctrlC := tea.KeyMsg{Type: tea.KeyCtrlC}
-	updated, _ := m.Update(ctrlC)
-	m = updated.(model)
-
-	if !m.quitting {
-		t.Fatal("model should quit on ctrl+c")
-	}
-	if m.selected != nil {
-		t.Fatal("selected repo should be cleared on ctrl+c cancel")
-	}
-}
-
 func TestFeaturePromptVisibleRangeCentersSelectionWhenPossible(t *testing.T) {
 	start, end := featurePromptVisibleRange(20, 10, 6)
 	if start != 7 {
@@ -476,5 +451,67 @@ func TestFeaturePromptVisibleRangeClampsNearEdges(t *testing.T) {
 	start, end = featurePromptVisibleRange(20, 19, 6)
 	if start != 14 || end != 20 {
 		t.Fatalf("near end range=(%d,%d), want (14,20)", start, end)
+	}
+}
+
+func TestDefaultWorktreeIndexPrefersDefaultBranch(t *testing.T) {
+	options := []string{"feat-x", "main", "review"}
+	if got := defaultWorktreeIndex(options, "main"); got != 1 {
+		t.Fatalf("defaultWorktreeIndex=%d, want 1", got)
+	}
+	if got := defaultWorktreeIndex(options, "feat-x"); got != 0 {
+		t.Fatalf("defaultWorktreeIndex=%d, want 0 for explicit default", got)
+	}
+}
+
+func TestDefaultWorktreeIndexFallsBackToMainThenMaster(t *testing.T) {
+	options := []string{"develop", "master", "feat-x"}
+	if got := defaultWorktreeIndex(options, "trunk"); got != 1 {
+		t.Fatalf("defaultWorktreeIndex=%d, want 1 (master fallback)", got)
+	}
+	if got := defaultWorktreeIndex(options, ""); got != 1 {
+		t.Fatalf("defaultWorktreeIndex=%d, want 1 with empty default", got)
+	}
+	if got := defaultWorktreeIndex([]string{"a", "b"}, "trunk"); got != 0 {
+		t.Fatalf("defaultWorktreeIndex=%d, want 0 when no branch matches", got)
+	}
+}
+
+func TestWorktreeCursorSeedsToDefaultBranch(t *testing.T) {
+	repo := github.Repo{Name: "foo", FullName: "org/foo", DefaultBranch: "main"}
+	m := newModel([]github.Repo{repo}, false, map[string]bool{"org/foo": true}, true)
+	m.repoWorktrees[repo.FullName] = []string{"feat-x", "main", "review"}
+
+	options := m.worktreeOptionsForRepo(&repo)
+	if got := m.worktreeCursor(&repo, options); got != 1 {
+		t.Fatalf("worktreeCursor=%d, want 1 (main)", got)
+	}
+	// Seeded value must persist across calls.
+	if got := m.worktreeCursor(&repo, options); got != 1 {
+		t.Fatalf("worktreeCursor after seed=%d, want 1", got)
+	}
+}
+
+func TestWorktreeCursorKeepsExplicitSelection(t *testing.T) {
+	repo := github.Repo{Name: "foo", FullName: "org/foo", DefaultBranch: "main"}
+	m := newModel([]github.Repo{repo}, false, map[string]bool{"org/foo": true}, true)
+	m.repoWorktrees[repo.FullName] = []string{"main", "feat-x"}
+	m.worktreeSelection[repo.FullName] = 1
+
+	options := m.worktreeOptionsForRepo(&repo)
+	if got := m.worktreeCursor(&repo, options); got != 1 {
+		t.Fatalf("worktreeCursor=%d, want 1 (explicit)", got)
+	}
+}
+
+func TestWorktreeCursorClampsStaleIndex(t *testing.T) {
+	repo := github.Repo{Name: "foo", FullName: "org/foo", DefaultBranch: "main"}
+	m := newModel([]github.Repo{repo}, false, map[string]bool{"org/foo": true}, true)
+	m.repoWorktrees[repo.FullName] = []string{"main", "feat-x"}
+	m.worktreeSelection[repo.FullName] = 9
+
+	options := m.worktreeOptionsForRepo(&repo)
+	if got := m.worktreeCursor(&repo, options); got != 0 {
+		t.Fatalf("worktreeCursor=%d, want 0 (main after clamp)", got)
 	}
 }

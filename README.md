@@ -49,14 +49,16 @@ Primary command. It ensures local state, then runs `open_command` unless `--no-o
 - `ezgit owner/repo`: ensure repo exists (regular clone), then open.
 - `ezgit owner/repo worktree`: ensure worktree exists (worktree layout), then open.
 
+When no worktree is specified, repos in the worktree layout open their default-branch worktree (`main`/`master`, falling back to the first worktree); regular clones open the repo root.
+
 The TUI picker is only available from bare `ezgit`; subcommands stay scriptable.
 
 No-arg picker shortcuts:
 
 - `tab`: toggle repo scope `all -> local -> opened`.
 - `left/right`: switch focus between repo list and worktree pane.
-- `enter` in repo pane: open repo root.
-- `enter` in worktree pane: open selected worktree (repo root is intentionally hidden there).
+- `enter` in repo pane: open the repo (default-branch worktree for worktree layouts, repo root otherwise).
+- `enter` in worktree pane: open selected worktree; the pane preselects the default branch (`main`/`master`).
 - `enter` on `+ new worktree`: inline create mode (`name[:base]`) and create+open on confirm.
 - `esc` / `ctrl+c`: cancel.
 
@@ -83,7 +85,7 @@ ezgit list repos                  # all cached repos, one per line
 ezgit list repos --local          # cached repos present under clone_dir
 ezgit list worktrees owner/repo   # local worktrees, one per line
 ezgit describe owner/repo         # JSON: cloned/layout/worktrees/path
-ezgit open owner/repo             # ensure normal clone, open repo root
+ezgit open owner/repo             # ensure clone, open default worktree (main/master) for worktree layouts, repo root otherwise
 ezgit open owner/repo feature-x   # ensure bare worktree layout, open feature-x
 ezgit clone --worktree owner/repo # bare metadata + default-branch worktree
 ezgit clone --bare owner/repo     # alias for --worktree

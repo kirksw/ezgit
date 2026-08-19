@@ -61,7 +61,7 @@ func runRootDirect(cfg *config.Config, repoInput string, worktreeName string) er
 	}
 
 	repo := &github.Repo{FullName: repoFullName, DefaultBranch: defaultBranch}
-	return runOpenRepoSelection(cfg, repo, []github.Repo{*repo}, map[string]bool{repoFullName: true}, "")
+	return runOpenRepoSelection(cfg, repo, "")
 }
 
 func runRootFuzzy(cfg *config.Config) error {

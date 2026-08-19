@@ -261,7 +261,7 @@ func runFuzzyClone(cfg *config.Config, openMode bool) error {
 			}
 		}
 
-		return runOpenRepoSelection(cfg, result.Repo, localOnlyRepos, localRepos, result.SelectedWorktree)
+		return runOpenRepoSelection(cfg, result.Repo, result.SelectedWorktree)
 	}
 
 	worktree = result.Worktree
