@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -99,5 +101,116 @@ func TestBuildOpenCommandContextRejectsInvalidRepo(t *testing.T) {
 	}
 	if _, err := buildOpenCommandContext(cfg, "invalid", ""); err == nil {
 		t.Fatal("expected error for invalid repoFullName")
+	}
+}
+
+func TestBuildOpenCommandContextDefaultsToDefaultBranchWorktree(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	cloneDir := filepath.Join(root, "repos")
+	repoRoot := filepath.Join(cloneDir, "acme", "widgets")
+
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", "--bare", filepath.Join(repoRoot, ".git")).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare failed: %v: %s", err, out)
+	}
+	for _, dir := range []string{"main", "feat-x"} {
+		if err := os.MkdirAll(filepath.Join(repoRoot, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{Git: config.GitConfig{CloneDir: cloneDir}}
+	ctx, err := buildOpenCommandContext(cfg, "acme/widgets", "")
+	if err != nil {
+		t.Fatalf("buildOpenCommandContext() error = %v", err)
+	}
+
+	if ctx.Worktree != "main" {
+		t.Fatalf("Worktree=%q, want %q", ctx.Worktree, "main")
+	}
+	if ctx.RepoPath != "acme/widgets/main" {
+		t.Fatalf("RepoPath=%q, want %q", ctx.RepoPath, "acme/widgets/main")
+	}
+	wantAbsPath := filepath.Join(repoRoot, "main")
+	if ctx.AbsPath != wantAbsPath {
+		t.Fatalf("AbsPath=%q, want %q", ctx.AbsPath, wantAbsPath)
+	}
+}
+
+func TestBuildOpenCommandContextMasterFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	cloneDir := filepath.Join(root, "repos")
+	repoRoot := filepath.Join(cloneDir, "acme", "widgets")
+
+	if err := os.MkdirAll(filepath.Join(repoRoot, "master"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", "--bare", filepath.Join(repoRoot, ".git")).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare failed: %v: %s", err, out)
+	}
+
+	cfg := &config.Config{Git: config.GitConfig{CloneDir: cloneDir}}
+	ctx, err := buildOpenCommandContext(cfg, "acme/widgets", "")
+	if err != nil {
+		t.Fatalf("buildOpenCommandContext() error = %v", err)
+	}
+	if ctx.Worktree != "master" {
+		t.Fatalf("Worktree=%q, want master", ctx.Worktree)
+	}
+}
+
+func TestBuildOpenCommandContextWorktreeLayoutFallsBackToFirstDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	cloneDir := filepath.Join(root, "repos")
+	repoRoot := filepath.Join(cloneDir, "acme", "widgets")
+
+	if err := os.MkdirAll(filepath.Join(repoRoot, "develop"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoRoot, "feat-x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", "--bare", filepath.Join(repoRoot, ".git")).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare failed: %v: %s", err, out)
+	}
+
+	cfg := &config.Config{Git: config.GitConfig{CloneDir: cloneDir}}
+	ctx, err := buildOpenCommandContext(cfg, "acme/widgets", "")
+	if err != nil {
+		t.Fatalf("buildOpenCommandContext() error = %v", err)
+	}
+	if ctx.Worktree != "develop" {
+		t.Fatalf("Worktree=%q, want develop (first worktree dir)", ctx.Worktree)
+	}
+}
+
+func TestBuildOpenCommandContextRegularCloneOpensRepoRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	cloneDir := filepath.Join(root, "repos")
+	repoRoot := filepath.Join(cloneDir, "acme", "widgets")
+
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", repoRoot).CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v: %s", err, out)
+	}
+
+	cfg := &config.Config{Git: config.GitConfig{CloneDir: cloneDir}}
+	ctx, err := buildOpenCommandContext(cfg, "acme/widgets", "")
+	if err != nil {
+		t.Fatalf("buildOpenCommandContext() error = %v", err)
+	}
+	if ctx.Worktree != "" {
+		t.Fatalf("Worktree=%q, want empty for regular clone", ctx.Worktree)
+	}
+	if ctx.AbsPath != repoRoot {
+		t.Fatalf("AbsPath=%q, want %q", ctx.AbsPath, repoRoot)
 	}
 }
