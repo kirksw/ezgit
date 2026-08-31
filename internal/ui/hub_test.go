@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/kirksw/ezgit/internal/github"
 )
 
@@ -89,4 +90,35 @@ func TestHubViewShowsConvertHintOnlyInOpenMode(t *testing.T) {
 	if strings.Contains(cloneView, "ctrl+c: convert") {
 		t.Fatal("did not expect convert hint in clone mode")
 	}
+}
+
+func TestHubViewFitsConstrainedWidth(t *testing.T) {
+	repos := []github.Repo{{
+		Name:        "repository-with-a-name-that-is-too-wide",
+		FullName:    "organization/repository-with-a-name-that-is-too-wide",
+		Description: "A repository description that must not wrap inside a constrained modal.",
+	}}
+	m := newHubModel(repos, nil, nil, nil, false)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 32, Height: 20})
+	view := updated.(hubModel).View()
+	for i, line := range strings.Split(view, "\n") {
+		if width := visibleLineWidth(line); width > 32 {
+			t.Fatalf("line %d width=%d, want <= 32: %q", i+1, width, line)
+		}
+	}
+	if !strings.Contains(view, "…") {
+		t.Fatal("expected constrained content to be truncated")
+	}
+}
+
+func TestTruncateDisplayWidthHandlesWideRunes(t *testing.T) {
+	got := truncateDisplayWidth("界界界", 5)
+	if got != "界界…" {
+		t.Fatalf("truncateDisplayWidth()=%q, want %q", got, "界界…")
+	}
+}
+
+func visibleLineWidth(line string) int {
+	return lipgloss.Width(line)
 }

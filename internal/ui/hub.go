@@ -64,13 +64,14 @@ func (d hubItemDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 		if item.IsLocal {
 			prefix = "* "
 		}
-		text := fmt.Sprintf("%s%s/%s", prefix, item.Owner, item.Name)
+		name := truncateDisplayWidth(fmt.Sprintf("%s%s/%s", prefix, item.Owner, item.Name), m.Width())
+		text := name
 		if item.Description != "" {
-			text += fmt.Sprintf("\n  %s", truncateString(item.Description, 60))
+			text += "\n  " + truncateDisplayWidth(item.Description, m.Width()-2)
 		}
 		fmt.Fprint(w, style.Render(text))
 	case hubSessionItem:
-		fmt.Fprint(w, style.Render(item.Name))
+		fmt.Fprint(w, style.Render(truncateDisplayWidth(item.Name, m.Width())))
 	default:
 		fmt.Fprint(w, style.Render("?"))
 	}
@@ -142,13 +143,14 @@ func (m hubModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetWidth(msg.Width)
+		contentWidth := max(msg.Width, 1)
+		m.list.SetWidth(contentWidth)
 		listHeight := msg.Height - 9
 		if listHeight < 4 {
 			listHeight = 4
 		}
 		m.list.SetHeight(listHeight)
-		m.input.Width = msg.Width - 4
+		m.input.Width = max(msg.Width-4, 1)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -379,7 +381,7 @@ func (m hubModel) View() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("ezgit tui"))
 	b.WriteString("\n")
-	b.WriteString(modeLabel.String())
+	b.WriteString(truncateDisplayWidth(modeLabel.String(), m.width))
 	b.WriteString("\n\n")
 	b.WriteString(normalStyle.Render(title))
 	b.WriteString("\n\n")
@@ -393,8 +395,30 @@ func (m hubModel) View() string {
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(instructionStyle.Render(instructions))
+	b.WriteString(instructionStyle.Render(truncateDisplayWidth(instructions, m.width)))
 	return b.String()
+}
+
+func truncateDisplayWidth(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+
+	var b strings.Builder
+	for _, r := range value {
+		candidate := b.String() + string(r)
+		if lipgloss.Width(candidate)+1 > width {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return b.String() + "…"
 }
 
 func RunHub(

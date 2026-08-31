@@ -1,5 +1,12 @@
 # Release Notes
 
+## 0.0.18 - 2026-08-31
+
+Constrained-width TUI rendering:
+- Truncated repository names, descriptions, tmux session names, mode tabs, and footer instructions to the terminal's reported display width so the unified TUI remains stable inside narrow herdr modals.
+- Accounted for wide Unicode characters when truncating and clamped component widths for very narrow terminals.
+- Added regression coverage that verifies every rendered line fits within a constrained modal width.
+
 ## 0.0.17 - 2026-08-19
 
 Default-branch worktree selection:
