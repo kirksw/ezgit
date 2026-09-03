@@ -64,6 +64,16 @@ func TestHubOpenModeConvertShortcut(t *testing.T) {
 	}
 }
 
+func TestHubRefreshShortcutReturnsRefreshResult(t *testing.T) {
+	m := newHubModel(nil, nil, nil, nil, false)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = updated.(hubModel)
+	if !m.quitting || m.cancelled || m.action != hubActionNone {
+		t.Fatal("expected refresh shortcut to quit without a selection or cancellation")
+	}
+}
+
 func TestHubCloneWorktreeToggle(t *testing.T) {
 	m := newHubModel(nil, nil, nil, nil, false)
 	if m.worktree {
@@ -74,6 +84,13 @@ func TestHubCloneWorktreeToggle(t *testing.T) {
 	m = updated.(hubModel)
 	if !m.worktree {
 		t.Fatal("worktree should toggle on in clone mode")
+	}
+}
+
+func TestHubViewShowsRefreshHint(t *testing.T) {
+	m := newHubModel(nil, nil, nil, nil, false)
+	if !strings.Contains(m.View(), "ctrl+r: refresh cache") {
+		t.Fatal("expected refresh hint")
 	}
 }
 

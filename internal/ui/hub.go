@@ -26,6 +26,7 @@ type HubResult struct {
 	Session   string
 	Worktree  bool
 	Convert   bool
+	Refresh   bool
 	Cancelled bool
 }
 
@@ -173,6 +174,10 @@ func (m hubModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyUp, tea.KeyCtrlP:
 			m.list.CursorUp()
 			return m, nil
+		case tea.KeyCtrlR:
+			m.action = hubActionNone
+			m.quitting = true
+			return m, tea.Quit
 		case tea.KeyCtrlW:
 			if m.mode == HubModeClone {
 				m.worktree = !m.worktree
@@ -361,11 +366,11 @@ func (m hubModel) View() string {
 		if m.worktree {
 			worktreeState = "on"
 		}
-		instructions = fmt.Sprintf("up/down: navigate | tab/left/right: mode | ctrl+w: worktree (%s) | enter: clone | esc: cancel", worktreeState)
+		instructions = fmt.Sprintf("up/down: navigate | tab: mode | ctrl+r: refresh cache | ctrl+w: worktree (%s) | enter: clone | esc: cancel", worktreeState)
 	case HubModeOpen:
-		instructions = "up/down: navigate | tab/left/right: mode | ctrl+c: convert | enter: open | esc: cancel"
+		instructions = "up/down: navigate | tab: mode | ctrl+r: refresh cache | ctrl+c: convert | enter: open | esc: cancel"
 	case HubModeConnect:
-		instructions = "up/down: navigate | tab/left/right: mode | enter: connect | esc: cancel"
+		instructions = "up/down: navigate | tab: mode | ctrl+r: refresh cache | enter: connect | esc: cancel"
 	}
 
 	emptyText := "No items found"
@@ -448,6 +453,10 @@ func RunHub(
 		Cancelled: m.cancelled,
 	}
 	if m.cancelled {
+		return result, nil
+	}
+	if m.quitting && m.action == hubActionNone {
+		result.Refresh = true
 		return result, nil
 	}
 	if m.action == hubActionConvert {

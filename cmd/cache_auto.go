@@ -46,6 +46,16 @@ func autoRefreshConfiguredCaches(cfg *config.Config, c *cache.OrgCache) error {
 		refreshTargets = append(refreshTargets, cache.PersonalCacheKey)
 	}
 
+	return refreshCacheTargets(cfg, c, refreshTargets, false)
+}
+
+func refreshConfiguredCaches(cfg *config.Config, c *cache.OrgCache) error {
+	refreshTargets := append([]string(nil), cfg.GetOrganizations()...)
+	refreshTargets = append(refreshTargets, cache.PersonalCacheKey)
+	return refreshCacheTargets(cfg, c, refreshTargets, false)
+}
+
+func refreshCacheTargets(cfg *config.Config, c *cache.OrgCache, refreshTargets []string, fullRefresh bool) error {
 	if len(refreshTargets) == 0 {
 		return nil
 	}
@@ -76,7 +86,7 @@ func autoRefreshConfiguredCaches(cfg *config.Config, c *cache.OrgCache) error {
 			if _, _, err := refreshReposIncrementallyForAuto(
 				c,
 				org,
-				false,
+				fullRefresh,
 				func() ([]github.Repo, error) {
 					return client.FetchOrgRepos(org)
 				},
@@ -102,7 +112,7 @@ func autoRefreshConfiguredCaches(cfg *config.Config, c *cache.OrgCache) error {
 			if _, _, err := refreshReposIncrementallyForAuto(
 				c,
 				cache.PersonalCacheKey,
-				false,
+				fullRefresh,
 				func() ([]github.Repo, error) {
 					return client.FetchPrivateRepos()
 				},

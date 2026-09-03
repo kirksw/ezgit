@@ -73,6 +73,17 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	if result == nil || result.Cancelled {
 		return nil
 	}
+	if result.Refresh {
+		if backgroundRefreshDone != nil {
+			if err := <-backgroundRefreshDone; err != nil {
+				fmt.Printf("Warning: automatic cache refresh failed: %v\n", err)
+			}
+		}
+		if err := refreshConfiguredCaches(cfg, c); err != nil {
+			return fmt.Errorf("failed to refresh cache: %w", err)
+		}
+		return runTUI(cmd, args)
+	}
 
 	switch result.Mode {
 	case ui.HubModeClone:
