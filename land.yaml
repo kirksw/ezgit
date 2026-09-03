@@ -1,0 +1,16 @@
+version: 1
+base: main
+
+validation:
+  format: test -z "$(gofmt -l ./cmd ./internal)"
+  lint: go vet ./...
+  build: go build . && nix build .#
+  test: go test ./...
+
+publish:
+  strategy: pull_request
+
+merge:
+  mode: auto
+  method: merge
+  delete_branch: true
