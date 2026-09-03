@@ -163,7 +163,6 @@ return fmt.Errorf("failed to load config: %w", err)
 - Keep a discoverable index at `.agents/skills/INDEX.md`.
 - Current project skill:
   - `.agents/skills/release-skill/SKILL.md`
-  - `.agents/skills/land/SKILL.md`
 
 ## Agent Workflow
 - Default execution flow:
