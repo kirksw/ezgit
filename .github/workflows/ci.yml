@@ -2,40 +2,34 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
 
 permissions:
   contents: read
 
 jobs:
   build-and-test:
+    name: build, vet, test, nix
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
       - name: Verify formatting
-        shell: bash
-        run: |
-          set -euo pipefail
-          unformatted="$(gofmt -l .)"
-          if [[ -n "$unformatted" ]]; then
-            echo "::error::These files are not gofmt-formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
-
+        run: test -z "$(gofmt -l ./cmd ./internal)"
       - name: Build
         run: go build .
-
+      - name: Vet
+        run: go vet ./...
       - name: Test
         run: go test ./...
+      - name: Build with Nix
+        run: nix build .#
+      - name: Cross-compile
+        run: |
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            CGO_ENABLED=0 GOOS=${target%/*} GOARCH=${target#*/} go build .
+          done

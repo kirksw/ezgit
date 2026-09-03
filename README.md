@@ -210,6 +210,24 @@ Repository ensure/clone/convert flows register paths with `zoxide` using `zoxide
 
 ## Development
 
+Run the validation suite used by CI and the landing policy:
+
+```bash
+test -z "$(gofmt -l ./cmd ./internal)"
+go build .
+go vet ./...
+go test ./...
+nix build .#
+```
+
+Completed changes are submitted through [git-land](https://github.com/kirksw/git-land):
+
+```bash
+nix run github:kirksw/git-land#land --json
+```
+
+The committed `land.yaml` policy creates a pull request, waits for CI, and merges automatically after all required checks pass.
+
 ```bash
 go test ./...
 nix run .# -- --help

@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    tags: ["v*.*.*"]
 
 permissions:
   contents: write
@@ -20,9 +19,9 @@ jobs:
       version: ${{ steps.semver.outputs.version }}
       prerelease: ${{ steps.semver.outputs.prerelease }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Validate release tag
         id: semver
         shell: bash
@@ -75,14 +74,17 @@ jobs:
             archive: zip
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
+      - name: Verify source
+        run: |
+          test -z "$(gofmt -l ./cmd ./internal)"
+          go vet ./...
+          go test ./...
+          nix build .#
       - name: Build and package
         shell: bash
         run: |
@@ -101,9 +103,7 @@ jobs:
           else
             tar -C dist -czf "${artifact_name}" "${binary_name}"
           fi
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ezgit-${{ needs.prepare.outputs.tag }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ezgit-${{ needs.prepare.outputs.tag }}-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.archive }}
@@ -113,17 +113,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [prepare, build]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           path: dist
           pattern: ezgit-${{ needs.prepare.outputs.tag }}-*
           merge-multiple: true
-
-      - name: Extract release notes from RELEASE_NOTES.md
+      - name: Extract release notes
         shell: bash
         run: |
           set -euo pipefail
@@ -140,16 +136,13 @@ jobs:
             echo "::error::No release notes found for version $version in RELEASE_NOTES.md"
             exit 1
           fi
-
       - name: Generate checksums
         shell: bash
         run: |
           set -euo pipefail
           cd dist
           sha256sum ezgit-${{ needs.prepare.outputs.tag }}-* > SHA256SUMS.txt
-
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}

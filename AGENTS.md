@@ -163,6 +163,7 @@ return fmt.Errorf("failed to load config: %w", err)
 - Keep a discoverable index at `.agents/skills/INDEX.md`.
 - Current project skill:
   - `.agents/skills/release-skill/SKILL.md`
+  - `.agents/skills/land/SKILL.md`
 
 ## Agent Workflow
 - Default execution flow:
@@ -173,8 +174,9 @@ return fmt.Errorf("failed to load config: %w", err)
   5) review
   6) document
   7) prompt user
-  8) push (and optionally release)
-- Ask for confirmation only before push/release, not before commit.
+  8) submit with `land --json` (and optionally release)
+- Use `land --json` for submission; it creates or updates the pull request, waits for CI, and merges automatically after checks pass.
+- Ask for confirmation only before release, not before commit or submission.
 - Use clarifying questions only when ambiguity materially changes implementation.
 - In review step, run at least relevant targeted tests; run `go test ./...` for broad-impact changes.
 - In document step, loop by intent:
