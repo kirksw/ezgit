@@ -55,6 +55,7 @@ The TUI picker is only available from bare `ezgit`; subcommands stay scriptable.
 
 No-arg picker shortcuts:
 
+- `ctrl+r`: refresh configured organization and personal repository caches, then reopen the picker.
 - `tab`: toggle repo scope `all -> local -> opened`.
 - `left/right`: switch focus between repo list and worktree pane.
 - `enter` in repo pane: open the repo (default-branch worktree for worktree layouts, repo root otherwise).
