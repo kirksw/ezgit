@@ -1,5 +1,15 @@
 # Release Notes
 
+## 0.0.19 - 2026-09-07
+
+TUI cache refresh:
+- Added `ctrl+r` to refresh configured organization and personal repository caches from the unified TUI, then reopen the picker with updated results.
+- Waited for any startup background refresh before starting the requested refresh.
+- Added the refresh shortcut to the TUI footer and regression tests for shortcut handling.
+
+Maintenance:
+- Aligned landing and Nix validation workflows and removed the embedded land skill.
+
 ## 0.0.18 - 2026-08-31
 
 Constrained-width TUI rendering:
