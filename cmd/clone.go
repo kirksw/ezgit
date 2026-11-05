@@ -113,7 +113,7 @@ func addCloneFlags(cmd *cobra.Command, includeLayout bool) {
 	cmd.Flags().StringVarP(&branch, "branch", "b", "", "clone specific branch (non-worktree clones)")
 	cmd.Flags().IntVar(&depth, "depth", 0, "create a shallow clone with specified depth")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "suppress output")
-	cmd.Flags().StringVar(&keyPath, "key-path", "", "SSH key path (default: ~/.ssh/id_rsa)")
+	cmd.Flags().StringVar(&keyPath, "key-path", "", "SSH key path (default: your ssh configuration)")
 	cmd.Flags().StringVarP(&cloneDest, "dest", "d", "", "destination directory")
 	if includeLayout {
 		cmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "clone as bare metadata repo with default worktrees")
@@ -127,6 +127,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if err := validateRepoInput(args[0]); err != nil {
+		return err
 	}
 
 	return runCloneWithWorktreeAndBase(cfg, args[0], args[1], "")
@@ -167,6 +171,10 @@ func resolveFeatureWorktreeConfig(defaultBranch, featureBranchInput, baseBranchI
 }
 
 func runClone(cmd *cobra.Command, args []string) error {
+	if err := validateRepoInput(args[0]); err != nil {
+		return err
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -381,17 +389,7 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 		return fmt.Errorf("invalid repo format: %w", err)
 	}
 
-	sshKey := keyPath
-	if sshKey == "" {
-		home, _ := os.UserHomeDir()
-		sshKey = filepath.Join(home, ".ssh", "id_rsa")
-	}
-
 	gitMgr := git.New()
-
-	if err := gitMgr.ValidateSSHKey(sshKey); err != nil {
-		return fmt.Errorf("SSH key validation failed: %w", err)
-	}
 
 	dest := cloneDest
 	if dest == "" {
@@ -484,6 +482,12 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 		}
 	}
 
+	if didClone && keyPath != "" {
+		if err := gitMgr.ValidateSSHKey(keyPath); err != nil {
+			return fmt.Errorf("SSH key validation failed: %w", err)
+		}
+	}
+
 	if worktree {
 		if err := os.MkdirAll(dest, 0755); err != nil {
 			return fmt.Errorf("failed to create destination directory: %w", err)
@@ -495,7 +499,7 @@ func runDirectClone(cfg *config.Config, repoInput string, defaultBranch string, 
 		Branch:     branch,
 		Depth:      cloneDepth,
 		Quiet:      quiet,
-		SSHKeyPath: sshKey,
+		SSHKeyPath: keyPath,
 	}
 
 	if !quiet && didClone {
@@ -793,13 +797,19 @@ func isBareGitDir(gitDir string) (bool, error) {
 
 func resolveExistingRegularRepoAction(dest string) (existingRepoAction, error) {
 	if !isInteractiveStdin() {
-		return existingRepoActionCancel, fmt.Errorf("destination %s is an existing non-worktree clone; re-run interactively to choose open or auto-convert", dest)
+		return existingRepoActionCancel, fmt.Errorf("destination %s is an existing non-worktree clone; re-run interactively, or run 'ezgit convert %s' first", dest, dest)
 	}
 
+	return promptExistingRegularRepoAction(os.Stdin, os.Stdout, dest)
+}
+
+func promptExistingRegularRepoAction(in io.Reader, out io.Writer, dest string) (existingRepoAction, error) {
+	reader := bufio.NewReader(in)
 	for {
-		fmt.Printf("Repository already exists at %s and is not in worktree layout. Choose action: [o]pen existing, [c]onvert to worktree, [x] cancel: ", dest)
-		input, err := readLineTrimmed(os.Stdin)
-		if err != nil {
+		fmt.Fprintf(out, "Repository already exists at %s and is not in worktree layout. Choose action: [o]pen existing, [c]onvert to worktree, [x] cancel: ", dest)
+		line, err := reader.ReadString('\n')
+		input := strings.TrimSpace(line)
+		if err != nil && (err != io.EOF || input == "") {
 			return existingRepoActionCancel, fmt.Errorf("failed to read action: %w", err)
 		}
 		switch strings.ToLower(input) {
@@ -810,18 +820,9 @@ func resolveExistingRegularRepoAction(dest string) (existingRepoAction, error) {
 		case "x", "cancel":
 			return existingRepoActionCancel, nil
 		default:
-			fmt.Println("Please choose one of: o, c, x")
+			fmt.Fprintln(out, "Please choose one of: o, c, x")
 		}
 	}
-}
-
-func readLineTrimmed(in io.Reader) (string, error) {
-	reader := bufio.NewReader(in)
-	line, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
-	}
-	return strings.TrimSpace(line), nil
 }
 
 func registerRepoAndWorktreesWithZoxide(gitMgr git.GitManager, repoRoot string, quiet bool) {

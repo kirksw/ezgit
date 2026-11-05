@@ -23,6 +23,9 @@ func runInvalidateCache(cmd *cobra.Command, args []string) error {
 
 	if len(args) == 1 {
 		org := args[0]
+		if err := validateOrgName(org); err != nil {
+			return err
+		}
 		if err := c.Invalidate(org); err != nil {
 			return fmt.Errorf("failed to invalidate cache for %s: %w", org, err)
 		}

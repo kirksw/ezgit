@@ -74,6 +74,15 @@ Worktree mode is now implicit:
 
 Convert a local repository to bare metadata in `.git` + worktrees.
 
+The existing `.git` directory is kept, so remotes, branches, stashes, local config, and hooks all survive.
+Conversion deletes the working tree, so it refuses to run unless that loses nothing. It stops without changing the repository if there are:
+
+- uncommitted, untracked, or ignored files (including files marked assume-unchanged or skip-worktree);
+- existing linked worktrees;
+- a repository already in worktree layout, or a checkout that is itself a linked worktree or submodule.
+
+Commit, move, or remove what it lists (for example `git clean -fdX` for ignored build output), then re-run.
+
 Flags: `-w` create worktree for specific branch(es), `--all-worktrees` create worktree for all branches, `--no-worktrees` skip worktree creation, `--key-path` SSH key.
 
 ### Agent-friendly commands
@@ -87,7 +96,7 @@ ezgit list repos --local          # cached repos present under clone_dir
 ezgit list worktrees owner/repo   # local worktrees, one per line
 ezgit describe owner/repo         # JSON: cloned/layout/worktrees/path
 ezgit open owner/repo             # ensure clone, open default worktree (main/master) for worktree layouts, repo root otherwise
-ezgit open owner/repo feature-x   # ensure bare worktree layout, open feature-x
+ezgit open owner/repo feature-x   # ensure feature-x in a worktree layout, open it (never converts a regular clone)
 ezgit clone --worktree owner/repo # bare metadata + default-branch worktree
 ezgit clone --bare owner/repo     # alias for --worktree
 ezgit wt add owner/repo feature-x # add feature worktree from default branch
@@ -146,9 +155,10 @@ ezgit skill > SKILL.md
 Config lookup order:
 
 1. `--config /path/to/config.toml`
-2. `./config.toml`
-3. `~/.config/ezgit/config.toml`
-4. `~/.ezgit.toml`
+2. `~/.config/ezgit/config.toml`
+3. `~/.ezgit.toml`
+
+A `config.toml` in the working directory is not loaded automatically, because `open_command` runs as a shell command. Pass `--config ./config.toml` to use one you trust.
 
 Minimal example:
 
@@ -164,6 +174,12 @@ clone_dir = "~/git/github.com"
 open_command = "sesh connect \"$absPath\""
 shallow_prompt_threshold_kb = 204800
 ```
+
+Clones use your normal ssh setup (agent, `~/.ssh/config`, default keys). Pass `--key-path` to `ezgit` or `ezgit clone` to use a specific key.
+
+Repository arguments must be `owner/repo` or a full URL. Names that could resolve outside `clone_dir`, such as `../repo`, are rejected.
+
+Prompts only appear when stdin is a terminal. With stdin redirected, including from `/dev/null`, commands fail with an error rather than wait for input.
 
 GitHub auth resolution order:
 

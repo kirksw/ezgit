@@ -1,5 +1,27 @@
 # Release Notes
 
+## 0.0.20 - 2026-11-05
+
+Data-loss fixes:
+- `ezgit convert` no longer discards work: it refuses to run while uncommitted, untracked, or ignored files or linked worktrees exist, and refuses repositories already in worktree layout, which previously lost every worktree.
+- Conversion now keeps the existing `.git` directory, so `origin`, remote branches, stashes, local config, and hooks survive. Previously `origin` was repointed at the repository's own path and remote branches were dropped.
+- `-w` branches are validated before the repository changes.
+- `ezgit open <repo> <worktree>` no longer converts a regular clone silently; it now fails and points to `ezgit convert`.
+
+Non-interactive behavior:
+- Stdin from `/dev/null` is no longer treated as a terminal, and end of input now cancels the existing-clone prompt. Previously this looped forever, writing output without limit.
+
+Security:
+- A `config.toml` in the working directory is no longer loaded automatically, because a checkout could use it to run commands through `open_command`. Use `--config ./config.toml` for a file you trust.
+- Repository and organization arguments that could resolve outside `clone_dir` or the cache directory, such as `../repo`, are rejected.
+
+SSH:
+- `~/.ssh/id_rsa` is no longer required. Clones use your normal ssh setup unless `--key-path` is passed, and existing repositories no longer need a valid key.
+
+Upgrade notes:
+- Move any `./config.toml` you rely on to `~/.config/ezgit/config.toml`, or pass `--config`.
+- Repositories converted by earlier versions may still have `origin` pointing at their own path. Check with `git -C <repo>/.git remote get-url origin` and fix with `git remote set-url origin <url>`, then add the refspec with `git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"` and run `git fetch origin`.
+
 ## 0.0.19 - 2026-09-07
 
 TUI cache refresh:

@@ -208,3 +208,20 @@ func TestGetGitHubToken(t *testing.T) {
 		}
 	})
 }
+
+func TestFindConfigPathIgnoresWorkingDirectoryConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workDir := t.TempDir()
+	cwdConfig := filepath.Join(workDir, "config.toml")
+	if err := os.WriteFile(cwdConfig, []byte("[git]\nopen_command = \"evil\"\n"), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+	t.Chdir(workDir)
+
+	if path, err := FindConfigPath(""); err == nil {
+		t.Fatalf("FindConfigPath() = %q, want no config found", path)
+	}
+	if path, err := FindConfigPath(cwdConfig); err != nil || path != cwdConfig {
+		t.Fatalf("FindConfigPath(explicit) = %q, %v, want %q", path, err, cwdConfig)
+	}
+}

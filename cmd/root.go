@@ -37,7 +37,7 @@ func init() {
 	rootCmd.SetVersionTemplate("ezgit {{.Version}}\n")
 	rootCmd.Flags().BoolP("version", "v", false, "print version and exit")
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "verbose output")
-	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "config file path (default: ./config.toml, ~/.config/ezgit/config.toml, or ~/.ezgit.toml)")
+	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "config file path (default: ~/.config/ezgit/config.toml or ~/.ezgit.toml)")
 	rootCmd.Flags().BoolVar(&noOpen, "no-open", false, "prepare repository/worktree but do not run open command")
 }
 

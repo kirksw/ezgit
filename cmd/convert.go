@@ -51,20 +51,28 @@ func runConvertPath(repoPath, repoDefaultBranch string) error {
 	}
 	repoPath = absRepoPath
 
+	if err := gitMgr.CheckConvertible(repoPath); err != nil {
+		return err
+	}
+
 	createDefaultWorktree := true
 	createReviewWorktree := true
 	customWorktrees := make([]ui.CloneWorktreeSpec, 0)
 	defaultBranch := ""
+	var branches []string
 
-	useDefaultWorktreeFlow := !noWorktrees && !allWorktrees && len(worktrees) == 0
-	if useDefaultWorktreeFlow {
-		branches, err := gitMgr.ListBranches(repoPath)
+	if !noWorktrees {
+		branches, err = gitMgr.ListBranches(repoPath)
 		if err != nil {
 			return fmt.Errorf("failed to list branches: %w", err)
 		}
 		defaultBranch = resolveConvertDefaultBranch(repoDefaultBranch, branches)
 
-		if isInteractiveStdin() {
+		if err := utils.ValidateBranches(branches, worktrees); err != nil {
+			return fmt.Errorf("branch validation failed: %w", err)
+		}
+
+		if !allWorktrees && len(worktrees) == 0 && isInteractiveStdin() {
 			plan, cancelled, planErr := ui.RunCloneWorktreePlanPrompt(branches, defaultBranch, true)
 			if planErr != nil {
 				return fmt.Errorf("failed to configure convert worktree options: %w", planErr)
@@ -94,21 +102,13 @@ func runConvertPath(repoPath, repoDefaultBranch string) error {
 
 	bareMetadataPath := filepath.Join(repoPath, ".git")
 
-	branches, err := gitMgr.ListBranches(bareMetadataPath)
-	if err != nil {
-		return fmt.Errorf("failed to list branches: %w", err)
-	}
-	if defaultBranch == "" {
-		defaultBranch = resolveConvertDefaultBranch(repoDefaultBranch, branches)
-	}
-
 	switch {
 	case allWorktrees:
 		if err := createAllConvertWorktrees(gitMgr, bareMetadataPath, repoPath, branches); err != nil {
 			return err
 		}
 	case len(worktrees) > 0:
-		if err := createSelectedConvertWorktrees(gitMgr, bareMetadataPath, repoPath, branches, worktrees); err != nil {
+		if err := createSelectedConvertWorktrees(gitMgr, bareMetadataPath, repoPath, worktrees); err != nil {
 			return err
 		}
 	default:
@@ -145,11 +145,8 @@ func createAllConvertWorktrees(gitMgr git.GitManager, bareMetadataPath, repoPath
 	return nil
 }
 
-func createSelectedConvertWorktrees(gitMgr git.GitManager, bareMetadataPath, repoPath string, branches []string, selected []string) error {
+func createSelectedConvertWorktrees(gitMgr git.GitManager, bareMetadataPath, repoPath string, selected []string) error {
 	fmt.Printf("Creating worktrees for %d branches...\n", len(selected))
-	if err := utils.ValidateBranches(branches, selected); err != nil {
-		return fmt.Errorf("branch validation failed: %w", err)
-	}
 	for _, branch := range selected {
 		cleanBranch := strings.TrimSpace(strings.TrimPrefix(branch, "origin/"))
 		worktreePath := utils.ParseWorktreePath(repoPath, cleanBranch)

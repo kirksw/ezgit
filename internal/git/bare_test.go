@@ -455,3 +455,185 @@ func TestCreateDetachedWorktreeFailsWhenPathExistsButNotRegistered(t *testing.T)
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func newConvertibleClone(t *testing.T) (repoDir string, originDir string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	sourceDir := filepath.Join(tmpDir, "source")
+	originDir = filepath.Join(tmpDir, "origin.git")
+	repoDir = filepath.Join(tmpDir, "repo")
+
+	runGit(t, "", "init", "-b", "main", sourceDir)
+	runGit(t, sourceDir, "config", "user.email", "test@example.com")
+	runGit(t, sourceDir, "config", "user.name", "test")
+	makeCommit(t, sourceDir, "README.md", "hello\n", "initial commit")
+	runGit(t, sourceDir, "branch", "develop")
+	runGit(t, "", "clone", "--bare", sourceDir, originDir)
+	runGit(t, "", "clone", originDir, repoDir)
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "test")
+	return repoDir, originDir
+}
+
+func TestConvertToBareRefusesWorkThatWouldBeLost(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, repoDir string)
+		file  string
+	}{
+		{
+			name: "modified tracked file",
+			setup: func(t *testing.T, repoDir string) {
+				writeTestFile(t, filepath.Join(repoDir, "README.md"), "edited\n")
+			},
+			file: "README.md",
+		},
+		{
+			name: "staged new file",
+			setup: func(t *testing.T, repoDir string) {
+				writeTestFile(t, filepath.Join(repoDir, "staged.txt"), "staged\n")
+				runGit(t, repoDir, "add", "staged.txt")
+			},
+			file: "staged.txt",
+		},
+		{
+			name: "untracked file",
+			setup: func(t *testing.T, repoDir string) {
+				writeTestFile(t, filepath.Join(repoDir, "untracked.txt"), "untracked\n")
+			},
+			file: "untracked.txt",
+		},
+		{
+			name: "untracked file hidden by config",
+			setup: func(t *testing.T, repoDir string) {
+				runGit(t, repoDir, "config", "status.showUntrackedFiles", "no")
+				writeTestFile(t, filepath.Join(repoDir, "hidden.txt"), "hidden\n")
+			},
+			file: "hidden.txt",
+		},
+		{
+			name: "ignored file",
+			setup: func(t *testing.T, repoDir string) {
+				writeTestFile(t, filepath.Join(repoDir, ".git", "info", "exclude"), ".env\n")
+				writeTestFile(t, filepath.Join(repoDir, ".env"), "secret\n")
+			},
+			file: ".env",
+		},
+		{
+			name: "assume-unchanged file",
+			setup: func(t *testing.T, repoDir string) {
+				runGit(t, repoDir, "update-index", "--assume-unchanged", "README.md")
+				writeTestFile(t, filepath.Join(repoDir, "README.md"), "hidden edit\n")
+			},
+			file: "README.md",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoDir, _ := newConvertibleClone(t)
+			tt.setup(t, repoDir)
+
+			if err := New().ConvertToBare(repoDir); err == nil {
+				t.Fatal("ConvertToBare() error = nil, want refusal")
+			}
+
+			if _, err := os.Stat(filepath.Join(repoDir, tt.file)); err != nil {
+				t.Fatalf("%s should survive a refused conversion: %v", tt.file, err)
+			}
+			if got := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "--is-bare-repository")); got != "false" {
+				t.Fatalf("is-bare-repository = %q, want false", got)
+			}
+		})
+	}
+}
+
+func TestConvertToBareKeepsRepositoryMetadata(t *testing.T) {
+	repoDir, originDir := newConvertibleClone(t)
+	runGit(t, repoDir, "config", "core.hooksPath", "custom-hooks")
+	writeTestFile(t, filepath.Join(repoDir, "README.md"), "stashed\n")
+	runGit(t, repoDir, "stash")
+
+	if err := New().ConvertToBare(repoDir); err != nil {
+		t.Fatalf("ConvertToBare() error = %v", err)
+	}
+
+	gitDir := filepath.Join(repoDir, ".git")
+	if got := strings.TrimSpace(runGit(t, gitDir, "remote", "get-url", "origin")); got != originDir {
+		t.Fatalf("origin = %q, want %q", got, originDir)
+	}
+	if got := runGit(t, gitDir, "config", "remote.origin.fetch"); !strings.Contains(got, "refs/remotes/origin/*") {
+		t.Fatalf("remote.origin.fetch = %q, want remote tracking refspec", got)
+	}
+	if got := runGit(t, gitDir, "branch", "-r"); !strings.Contains(got, "origin/develop") {
+		t.Fatalf("remote branches = %q, want origin/develop", got)
+	}
+	runGit(t, gitDir, "rev-parse", "--verify", "refs/stash")
+	if got := strings.TrimSpace(runGit(t, gitDir, "config", "core.hooksPath")); got != "custom-hooks" {
+		t.Fatalf("core.hooksPath = %q, want local config to survive", got)
+	}
+	if got := strings.TrimSpace(runGit(t, gitDir, "rev-parse", "--is-bare-repository")); got != "true" {
+		t.Fatalf("is-bare-repository = %q, want true", got)
+	}
+}
+
+func TestCreateWorktreeTracksRemoteOnlyBranchAfterConvert(t *testing.T) {
+	repoDir, _ := newConvertibleClone(t)
+	gitMgr := New()
+	if err := gitMgr.ConvertToBare(repoDir); err != nil {
+		t.Fatalf("ConvertToBare() error = %v", err)
+	}
+
+	worktreePath := filepath.Join(repoDir, "develop")
+	if err := gitMgr.CreateWorktree(filepath.Join(repoDir, ".git"), worktreePath, "develop"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "--abbrev-ref", "@{upstream}")); got != "origin/develop" {
+		t.Fatalf("upstream = %q, want origin/develop", got)
+	}
+}
+
+func TestConvertToBareRefusesWorktreeLayout(t *testing.T) {
+	repoDir, _ := newConvertibleClone(t)
+	gitMgr := New()
+	if err := gitMgr.ConvertToBare(repoDir); err != nil {
+		t.Fatalf("ConvertToBare() error = %v", err)
+	}
+	mainWorktree := filepath.Join(repoDir, "main")
+	if err := gitMgr.CreateWorktree(filepath.Join(repoDir, ".git"), mainWorktree, "main"); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	wipPath := filepath.Join(mainWorktree, "wip.txt")
+	writeTestFile(t, wipPath, "wip\n")
+
+	err := gitMgr.ConvertToBare(repoDir)
+	if err == nil || !strings.Contains(err.Error(), "already uses worktree layout") {
+		t.Fatalf("ConvertToBare() error = %v, want worktree layout refusal", err)
+	}
+	if _, err := os.Stat(wipPath); err != nil {
+		t.Fatalf("worktree file should survive a refused conversion: %v", err)
+	}
+}
+
+func TestConvertToBareRefusesLinkedWorktreeCheckout(t *testing.T) {
+	repoDir, _ := newConvertibleClone(t)
+	linkedDir := filepath.Join(t.TempDir(), "linked")
+	runGit(t, repoDir, "worktree", "add", "-b", "feature", linkedDir)
+
+	if err := New().ConvertToBare(linkedDir); err == nil {
+		t.Fatal("ConvertToBare(linked worktree) error = nil, want refusal")
+	}
+	if err := New().ConvertToBare(repoDir); err == nil {
+		t.Fatal("ConvertToBare(repo with linked worktree) error = nil, want refusal")
+	}
+	if _, err := os.Stat(filepath.Join(linkedDir, "README.md")); err != nil {
+		t.Fatalf("linked worktree should be untouched: %v", err)
+	}
+}
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write %s: %v", path, err)
+	}
+}

@@ -82,6 +82,14 @@ Ensure a named worktree exists and run the configured open command:
 ezgit open owner/repo feature-name
 ```
 
+This fails on a regular clone instead of converting it. Convert explicitly first:
+
+```bash
+ezgit convert /path/to/repo
+```
+
+`ezgit convert` refuses to run if uncommitted, untracked, or ignored files, or linked worktrees, would be affected.
+
 Prepare without running the open command:
 
 ```bash

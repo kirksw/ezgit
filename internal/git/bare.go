@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,8 @@ import (
 	"sort"
 	"strings"
 )
+
+const maxConvertBlockersShown = 10
 
 // ConfigureBareRemote fixes a bare clone so it has proper remote tracking.
 // git clone --bare does not set a fetch refspec and converts all remote
@@ -49,56 +52,133 @@ func (g *gitManager) ConfigureBareRemote(barePath, defaultBranch string) error {
 	return nil
 }
 
-func (g *gitManager) ConvertToBare(path string) error {
+// CheckConvertible returns an error unless path is a regular repository whose
+// working tree can be deleted without losing anything: ConvertToBare removes
+// every file outside .git, so anything git could not restore must block it.
+func (g *gitManager) CheckConvertible(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return fmt.Errorf("path does not exist: %s", path)
 	}
 
 	gitDir := filepath.Join(path, ".git")
-	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+	info, err := os.Lstat(gitDir)
+	if os.IsNotExist(err) {
 		return fmt.Errorf("not a git repository: %s", path)
 	}
-
-	parentDir := filepath.Dir(path)
-	tempBareDir, err := os.MkdirTemp(parentDir, "."+filepath.Base(path)+".bare-*")
 	if err != nil {
-		return fmt.Errorf("failed to create temporary directory: %w", err)
+		return fmt.Errorf("failed to inspect %s: %w", gitDir, err)
 	}
-	if err := os.Remove(tempBareDir); err != nil {
-		return fmt.Errorf("failed to prepare temporary bare directory: %w", err)
+	if !info.IsDir() {
+		return fmt.Errorf("cannot convert a linked worktree or submodule: %s", path)
 	}
-	cleanupTemp := true
-	defer func() {
-		if cleanupTemp {
-			_ = os.RemoveAll(tempBareDir)
-		}
-	}()
 
-	cloneArgs := []string{"clone", "--bare", path, tempBareDir}
-	cmd := exec.Command("git", cloneArgs...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create bare clone: %w\n%s", err, string(output))
+	isBare, err := gitOutput(path, "--git-dir", gitDir, "rev-parse", "--is-bare-repository")
+	if err != nil {
+		return fmt.Errorf("not a git repository: %s: %w", path, err)
+	}
+	if strings.TrimSpace(isBare) == "true" {
+		return fmt.Errorf("repository already uses worktree layout: %s", path)
+	}
+
+	worktreeList, err := gitOutput(path, "worktree", "list", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("failed to list worktrees: %w", err)
+	}
+	if strings.Count("\n"+worktreeList, "\nworktree ") > 1 {
+		return fmt.Errorf("repository has linked worktrees; remove them before converting: %s", path)
+	}
+
+	status, err := gitOutput(path, "status", "--porcelain", "--untracked-files=normal", "--ignored=traditional", "--ignore-submodules=none")
+	if err != nil {
+		return fmt.Errorf("failed to inspect working tree: %w", err)
+	}
+	blockers := nonEmptyLines(status)
+
+	// Files flagged assume-unchanged or skip-worktree are hidden from status.
+	tracked, err := gitOutput(path, "ls-files", "-v")
+	if err != nil {
+		return fmt.Errorf("failed to inspect tracked files: %w", err)
+	}
+	for _, line := range nonEmptyLines(tracked) {
+		if tag := line[0]; tag == 'S' || (tag >= 'a' && tag <= 'z') {
+			blockers = append(blockers, line)
+		}
+	}
+
+	if len(blockers) > 0 {
+		return fmt.Errorf(
+			"working tree has changes that converting would delete; commit, move, or remove them first:\n%s",
+			summarizeLines(blockers, maxConvertBlockersShown),
+		)
+	}
+	return nil
+}
+
+// ConvertToBare keeps the existing .git directory, so remotes, branches, stashes,
+// config, and hooks all survive the conversion.
+func (g *gitManager) ConvertToBare(path string) error {
+	if err := g.CheckConvertible(path); err != nil {
+		return err
+	}
+
+	if _, err := gitOutput(path, "config", "core.bare", "true"); err != nil {
+		return fmt.Errorf("failed to mark repository as bare: %w", err)
 	}
 
 	items, err := os.ReadDir(path)
 	if err != nil {
 		return fmt.Errorf("failed to read original repository: %w", err)
 	}
-
 	for _, item := range items {
+		if item.Name() == ".git" {
+			continue
+		}
 		itemPath := filepath.Join(path, item.Name())
 		if err := os.RemoveAll(itemPath); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", itemPath, err)
 		}
 	}
 
-	targetGitDir := filepath.Join(path, ".git")
-	if err := os.Rename(tempBareDir, targetGitDir); err != nil {
-		return fmt.Errorf("failed to move bare repository into %s: %w", targetGitDir, err)
+	indexPath := filepath.Join(path, ".git", "index")
+	if err := os.Remove(indexPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove %s: %w", indexPath, err)
 	}
-	cleanupTemp = false
 
 	return nil
+}
+
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+	}
+	return string(output), nil
+}
+
+func nonEmptyLines(text string) []string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func summarizeLines(lines []string, limit int) string {
+	shown := lines
+	if len(shown) > limit {
+		shown = shown[:limit]
+	}
+	summary := "  " + strings.Join(shown, "\n  ")
+	if hidden := len(lines) - len(shown); hidden > 0 {
+		summary += fmt.Sprintf("\n  ... and %d more", hidden)
+	}
+	return summary
 }
 
 func (g *gitManager) CreateWorktree(barePath, worktreePath, branch string) error {
