@@ -58,7 +58,6 @@ func FindConfigPath(path string) (string, error) {
 	}
 
 	configPaths := []string{
-		"./config.toml",
 		filepath.Join(homeDir, ".config", "ezgit", "config.toml"),
 		filepath.Join(homeDir, ".ezgit.toml"),
 	}

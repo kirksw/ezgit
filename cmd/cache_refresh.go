@@ -22,6 +22,12 @@ func init() {
 }
 
 func runRefreshCache(cmd *cobra.Command, args []string) error {
+	if len(args) == 1 {
+		if err := validateOrgName(args[0]); err != nil {
+			return err
+		}
+	}
+
 	cfg, c, token, err := loadConfigAndCache()
 	if err != nil {
 		return err

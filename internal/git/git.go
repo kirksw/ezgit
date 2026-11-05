@@ -23,6 +23,7 @@ type CloneOptions struct {
 type GitManager interface {
 	Clone(url, path string, opts CloneOptions) error
 	ConfigureBareRemote(barePath, defaultBranch string) error
+	CheckConvertible(path string) error
 	ConvertToBare(path string) error
 	CreateWorktree(barePath, worktreePath, branch string) error
 	CreateDetachedWorktree(barePath, worktreePath, startPoint string) error

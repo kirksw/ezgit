@@ -5,22 +5,24 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/kirksw/ezgit/internal/cache"
 	"github.com/kirksw/ezgit/internal/config"
 	"github.com/kirksw/ezgit/internal/github"
+	"github.com/mattn/go-isatty"
 )
 
 const recommendedShallowDepth = 1
 
-func isInteractiveStdin() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
+var (
+	githubOwnerPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+	githubRepoPattern  = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._-]*$`)
+)
 
-	return (info.Mode() & os.ModeCharDevice) != 0
+func isInteractiveStdin() bool {
+	return isatty.IsTerminal(os.Stdin.Fd())
 }
 
 func resolveCloneDepthForLargeRepo(
@@ -156,9 +158,39 @@ func extractRepoFullName(input string) (string, bool) {
 	trimmed = strings.TrimSuffix(trimmed, "/")
 
 	parts := strings.Split(trimmed, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	if len(parts) != 2 || !githubOwnerPattern.MatchString(parts[0]) || !isValidGitHubRepoName(parts[1]) {
 		return "", false
 	}
 
 	return parts[0] + "/" + parts[1], true
+}
+
+func isValidGitHubRepoName(name string) bool {
+	return name != "." && name != ".." && githubRepoPattern.MatchString(name)
+}
+
+// validateRepoInput rejects repo arguments that could resolve outside clone_dir.
+func validateRepoInput(input string) error {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(trimmed, "git@") || strings.HasPrefix(trimmed, "https://") || strings.HasPrefix(trimmed, "http://") {
+		segments := strings.FieldsFunc(trimmed, func(r rune) bool { return r == '/' || r == ':' })
+		for _, segment := range segments {
+			if segment == "." || segment == ".." {
+				return fmt.Errorf("invalid repo format: %s", input)
+			}
+		}
+		return nil
+	}
+
+	if _, ok := extractRepoFullName(trimmed); !ok {
+		return fmt.Errorf("invalid repo format: %s (expected owner/repo or full URL)", input)
+	}
+	return nil
+}
+
+func validateOrgName(org string) error {
+	if !githubOwnerPattern.MatchString(org) {
+		return fmt.Errorf("invalid organization name: %s", org)
+	}
+	return nil
 }

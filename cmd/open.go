@@ -16,7 +16,7 @@ import (
 
 var openCmd = &cobra.Command{
 	Use:   "open <repo> [worktree-name]",
-	Short: "Open a locally cloned repository with the configured open command",
+	Short: "Ensure a repository is cloned, then run the configured open command",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE:  runOpen,
 }
@@ -106,9 +106,7 @@ func ensureOpenWorktree(cfg *config.Config, repoFullName, worktreeName string) e
 	case existingRepoMissing:
 		return cloneRepoWithWorktrees(cfg, repoFullName, defaultBranch, worktreeName)
 	case existingRepoRegular:
-		if err := runConvertPath(repoRootPath, defaultBranch); err != nil {
-			return err
-		}
+		return fmt.Errorf("repository at %s is a regular clone; run 'ezgit convert %s' to use worktrees", repoRootPath, repoRootPath)
 	case existingRepoNonRepo:
 		return fmt.Errorf("destination exists but is not a git repository: %s", repoRootPath)
 	}
