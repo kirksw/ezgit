@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -24,7 +25,7 @@ var worktreeAddCmd = &cobra.Command{
 	Use:   "add <repo> <worktreename>",
 	Short: "Add a worktree to a repository",
 	Args:  cobra.ExactArgs(2),
-	RunE:  runAdd,
+	RunE:  runWorktreeAdd,
 }
 
 var worktreePruneCmd = &cobra.Command{
@@ -37,6 +38,8 @@ var worktreePruneCmd = &cobra.Command{
 var (
 	worktreePruneOlderThan = "14d"
 	worktreePruneApply     bool
+	worktreeBase           string
+	worktreeJSON           bool
 )
 
 type staleWorktree struct {
@@ -48,8 +51,87 @@ type staleWorktree struct {
 func init() {
 	rootCmd.AddCommand(worktreeCmd)
 	worktreeCmd.AddCommand(worktreeAddCmd, worktreePruneCmd)
+	worktreeAddCmd.Flags().StringVar(&worktreeBase, "base", "", "base ref or commit (defaults to the repository default branch)")
+	worktreeAddCmd.Flags().BoolVar(&worktreeJSON, "json", false, "print path, branch, and base commit as JSON")
 	worktreePruneCmd.Flags().StringVar(&worktreePruneOlderThan, "older-than", "14d", "minimum worktree age (for example 14d or 48h)")
-	worktreePruneCmd.Flags().BoolVar(&worktreePruneApply, "apply", false, "remove listed worktrees, including dirty worktrees")
+	worktreePruneCmd.Flags().BoolVar(&worktreePruneApply, "apply", false, "remove listed worktrees Git can safely remove")
+}
+
+type worktreeResult struct {
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	BaseCommit string `json:"base_commit"`
+}
+
+func runWorktreeAdd(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	repo, err := parseRepository(args[0])
+	if err != nil {
+		return err
+	}
+	if cmd.Flags().Changed("base") && strings.TrimSpace(worktreeBase) == "" {
+		return fmt.Errorf("--base requires a non-empty ref or commit")
+	}
+	result, err := createLinkedWorktree(cfg, repo, args[1], worktreeBase)
+	if err != nil {
+		return err
+	}
+	if worktreeJSON {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), result.Path)
+	return nil
+}
+
+func createLinkedWorktree(cfg *config.Config, repo repository, name, base string) (worktreeResult, error) {
+	if !isValidGitHubRepoName(name) || strings.HasPrefix(name, ".") {
+		return worktreeResult{}, fmt.Errorf("invalid worktree name %q: expected a single branch name without slashes", name)
+	}
+	repoPath, _, err := localRepository(cfg, repo)
+	if err != nil {
+		return worktreeResult{}, err
+	}
+	path, err := filepath.Abs(repo.worktreePath(cfg, name))
+	if err != nil {
+		return worktreeResult{}, fmt.Errorf("failed to resolve worktree path: %w", err)
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return worktreeResult{}, fmt.Errorf("worktree destination already exists: %s", path)
+	} else if !os.IsNotExist(err) {
+		return worktreeResult{}, fmt.Errorf("failed to inspect worktree destination: %w", err)
+	}
+
+	var commit string
+	if base = strings.TrimSpace(base); base != "" {
+		commit, err = git.ResolveCommit(repoPath, base)
+		if err != nil {
+			return worktreeResult{}, err
+		}
+	} else {
+		refs := []string{git.RemoteDefaultRef(repoPath)}
+		if repo.Host == githubHost {
+			refs = append(refs, "refs/heads/"+resolveDefaultBranch(repo.fullName(), ""))
+		}
+		refs = append(refs, "refs/heads/main", "refs/heads/master")
+		for _, ref := range refs {
+			if ref != "" {
+				if commit, err = git.ResolveCommit(repoPath, ref); err == nil {
+					break
+				}
+			}
+		}
+		if commit == "" {
+			return worktreeResult{}, fmt.Errorf("cannot resolve the default branch for %s; specify --base", repo.fullName())
+		}
+	}
+	if err := git.AddLinkedWorktree(repoPath, path, name, commit); err != nil {
+		return worktreeResult{}, err
+	}
+	registerPathsWithZoxide([]string{path}, true)
+	return worktreeResult{Path: path, Branch: name, BaseCommit: commit}, nil
 }
 
 func runWorktreePrune(cmd *cobra.Command, args []string) error {
@@ -57,24 +139,14 @@ func runWorktreePrune(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-
-	repoFullName, ok := extractRepoFullName(args[0])
-	if !ok {
-		return fmt.Errorf("invalid repo format: %s", args[0])
-	}
-
-	repoPath := getRepoPath(cfg, repoFullName, false, resolveDefaultBranch(repoFullName, ""))
-	state, err := detectExistingRepoState(repoPath)
+	repo, err := parseRepository(args[0])
 	if err != nil {
 		return err
 	}
-	switch state {
-	case existingRepoMissing:
-		return fmt.Errorf("repository is not cloned: %s", repoFullName)
-	case existingRepoRegular:
-		return fmt.Errorf("repository does not use worktree layout: %s", repoFullName)
-	case existingRepoNonRepo:
-		return fmt.Errorf("destination exists but is not a git repository: %s", repoPath)
+	repoFullName := repo.fullName()
+	repoPath, _, err := localRepository(cfg, repo)
+	if err != nil {
+		return err
 	}
 
 	olderThan, err := parseWorktreeAge(worktreePruneOlderThan)
@@ -83,7 +155,7 @@ func runWorktreePrune(cmd *cobra.Command, args []string) error {
 	}
 
 	gitMgr := git.New()
-	worktrees, err := gitMgr.ListWorktreeDetails(repoPath)
+	worktrees, err := git.ListLinkedWorktrees(repoPath)
 	if err != nil {
 		return fmt.Errorf("failed to list worktrees for %s: %w", repoFullName, err)
 	}
@@ -106,7 +178,15 @@ func runWorktreePrune(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, candidate := range candidates {
-		if err := gitMgr.RemoveWorktree(repoPath, candidate.Path, true); err != nil {
+		hasChanges, err := git.WorktreeHasChanges(candidate.Path)
+		if err != nil {
+			return err
+		}
+		if hasChanges {
+			fmt.Printf("Skipped %s: contains local changes or ignored files\n", candidate.Path)
+			continue
+		}
+		if err := gitMgr.RemoveWorktree(repoPath, candidate.Path, false); err != nil {
 			return fmt.Errorf("failed to remove worktree %s: %w", candidate.Path, err)
 		}
 		fmt.Printf("Removed %s\n", candidate.Path)
@@ -161,6 +241,9 @@ func formatWorktreeAge(duration time.Duration) string {
 func findStaleWorktrees(worktrees []git.Worktree, cutoff time.Time) ([]staleWorktree, error) {
 	candidates := make([]staleWorktree, 0)
 	for _, worktree := range worktrees {
+		if worktree.Locked {
+			continue
+		}
 		branch := strings.TrimSpace(worktree.Branch)
 		worktreeName := filepath.Base(filepath.Clean(worktree.Path))
 		if branch == "main" || branch == "master" || worktreeName == "main" || worktreeName == "master" || worktreeName == ".git" {

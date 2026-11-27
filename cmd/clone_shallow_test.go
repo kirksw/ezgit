@@ -300,22 +300,6 @@ func TestResolveClonePathsStandardClone(t *testing.T) {
 	}
 }
 
-func TestResolveOpenTargetPathWithWorktree(t *testing.T) {
-	got := resolveOpenTargetPath("/tmp/repo", "main")
-	want := "/tmp/repo/main"
-	if got != want {
-		t.Fatalf("resolveOpenTargetPath()=%q, want %q", got, want)
-	}
-}
-
-func TestResolveOpenTargetPathWithoutWorktree(t *testing.T) {
-	got := resolveOpenTargetPath("/tmp/repo", "")
-	want := "/tmp/repo"
-	if got != want {
-		t.Fatalf("resolveOpenTargetPath()=%q, want %q", got, want)
-	}
-}
-
 func TestResolveRepoPathsUsesCloneDir(t *testing.T) {
 	cfg := &config.Config{
 		Git: config.GitConfig{CloneDir: "/tmp/clones"},

@@ -25,24 +25,6 @@ func (l *testRepoWorktreeLister) ListWorktrees(path string) ([]string, error) {
 	return append([]string(nil), l.worktrees...), nil
 }
 
-func TestContainsString(t *testing.T) {
-	if !containsString([]string{"main", "review"}, "review") {
-		t.Fatal("expected containsString to find value")
-	}
-	if containsString([]string{"main", "review"}, "feature/test") {
-		t.Fatal("did not expect containsString to find missing value")
-	}
-}
-
-func TestIsBuiltInWorktree(t *testing.T) {
-	if !isBuiltInWorktree("main", "main") || !isBuiltInWorktree("review", "main") {
-		t.Fatal("expected main/review to be built-in worktrees")
-	}
-	if isBuiltInWorktree("feature", "main") {
-		t.Fatal("did not expect feature to be built-in")
-	}
-}
-
 func TestBuildOpenWorktreeLoaderLoadsLocalRepoWorktrees(t *testing.T) {
 	cfg := &config.Config{Git: config.GitConfig{CloneDir: "/tmp/clones"}}
 	localRepos := map[string]bool{"acme/widgets": true}

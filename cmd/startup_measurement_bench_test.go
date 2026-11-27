@@ -128,7 +128,7 @@ func loadInitialWorktreesLazy(cfg *config.Config, allRepos []github.Repo, localR
 			continue
 		}
 
-		repoPath := getRepoPath(cfg, repo.FullName, false, repo.DefaultBranch)
+		repoPath := getRepoPath(cfg, repo.FullName)
 		if repoPath == "" {
 			return 0
 		}

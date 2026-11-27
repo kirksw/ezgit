@@ -152,9 +152,9 @@ func TestOpenWorktreeDoesNotConvertRegularClone(t *testing.T) {
 		t.Fatalf("failed to write untracked file: %v", err)
 	}
 
-	err := ensureOpenWorktree(cfg, "acme/repo", "feature")
-	if err == nil || !strings.Contains(err.Error(), "ezgit convert") {
-		t.Fatalf("ensureOpenWorktree() error = %v, want guidance to run convert", err)
+	_, err := buildOpenCommandContext(cfg, "acme/repo", "feature")
+	if err == nil || !strings.Contains(err.Error(), "ezgit wt add") {
+		t.Fatalf("buildOpenCommandContext() error = %v, want guidance to use wt add", err)
 	}
 	if _, statErr := os.Stat(untracked); statErr != nil {
 		t.Fatalf("untracked file should survive: %v", statErr)
@@ -322,8 +322,8 @@ func TestOpenWorktreeRejectsPathEscapingName(t *testing.T) {
 	}
 	worktree = false
 
-	if err := ensureOpenWorktree(cfg, "acme/repo", "../.."); err == nil {
-		t.Fatal("ensureOpenWorktree(../..) error = nil, want rejection")
+	if _, err := buildOpenCommandContext(cfg, "acme/repo", "../.."); err == nil {
+		t.Fatal("buildOpenCommandContext(../..) error = nil, want rejection")
 	}
 	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
 		t.Fatalf("repo should be untouched: %v", err)

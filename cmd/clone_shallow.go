@@ -171,21 +171,8 @@ func isValidGitHubRepoName(name string) bool {
 
 // validateRepoInput rejects repo arguments that could resolve outside clone_dir.
 func validateRepoInput(input string) error {
-	trimmed := strings.TrimSpace(input)
-	if strings.HasPrefix(trimmed, "git@") || strings.HasPrefix(trimmed, "https://") || strings.HasPrefix(trimmed, "http://") {
-		segments := strings.FieldsFunc(trimmed, func(r rune) bool { return r == '/' || r == ':' })
-		for _, segment := range segments {
-			if segment == "." || segment == ".." {
-				return fmt.Errorf("invalid repo format: %s", input)
-			}
-		}
-		return nil
-	}
-
-	if _, ok := extractRepoFullName(trimmed); !ok {
-		return fmt.Errorf("invalid repo format: %s (expected owner/repo or full URL)", input)
-	}
-	return nil
+	_, err := parseRepository(input)
+	return err
 }
 
 func validateOrgName(org string) error {

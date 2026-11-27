@@ -20,11 +20,11 @@ private = [
 
 # Git configuration
 [git]
-# Default directory for cloned repositories (optional)
-clone_dir = "~/git/github.com"
+# Clones live at root/<host>/<owner>/<repo>; linked worktrees under root/.worktrees.
+root = "~/git"
 # Command used when opening resolved repo/worktree paths (optional).
 # Available placeholders:
-#   $org, $repo, $worktree, $repoPath, $orgRepo, $repoFullName, $absPath
+#   $host, $org, $repo, $worktree, $repoPath, $orgRepo, $repoFullName, $absPath
 # Example for sesh:
 # open_command = "sesh connect \"$absPath\""
 # Example for tmux (session name: org/repo[/worktree]):

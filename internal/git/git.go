@@ -8,8 +8,11 @@ import (
 )
 
 type Worktree struct {
-	Path   string
-	Branch string
+	Path     string
+	Branch   string
+	Bare     bool
+	Locked   bool
+	Prunable bool
 }
 
 type CloneOptions struct {
@@ -73,7 +76,7 @@ func (g *gitManager) RemoveWorktree(path, worktreePath string, force bool) error
 }
 
 func (g *gitManager) ListWorktreeDetails(path string) ([]Worktree, error) {
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd := exec.Command("git", "worktree", "list", "--porcelain", "-z")
 	cmd.Dir = path
 	output, err := cmd.Output()
 	if err != nil {
@@ -88,12 +91,18 @@ func (g *gitManager) ListWorktreeDetails(path string) ([]Worktree, error) {
 		}
 		current = Worktree{}
 	}
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(string(output), "\x00") {
 		switch {
 		case line == "":
 			appendCurrent()
 		case strings.HasPrefix(line, "worktree "):
-			current.Path = strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+			current.Path = strings.TrimPrefix(line, "worktree ")
+		case line == "bare":
+			current.Bare = true
+		case line == "locked" || strings.HasPrefix(line, "locked "):
+			current.Locked = true
+		case line == "prunable" || strings.HasPrefix(line, "prunable "):
+			current.Prunable = true
 		case strings.HasPrefix(line, "branch refs/heads/"):
 			current.Branch = strings.TrimSpace(strings.TrimPrefix(line, "branch refs/heads/"))
 		}
@@ -102,71 +111,49 @@ func (g *gitManager) ListWorktreeDetails(path string) ([]Worktree, error) {
 	return worktrees, nil
 }
 
-func (g *gitManager) ListWorktrees(path string) ([]string, error) {
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
-	cmd.Dir = path
-	output, err := cmd.Output()
-	if err != nil {
+// ListLinkedWorktrees omits the first Git record, which is always the main worktree
+// (or bare repository), and excludes registrations Git marks as stale.
+func ListLinkedWorktrees(path string) ([]Worktree, error) {
+	worktrees, err := New().ListWorktreeDetails(path)
+	if err != nil || len(worktrees) == 0 {
 		return nil, err
 	}
-
-	repoPath := filepath.Clean(path)
-	if abs, err := filepath.Abs(repoPath); err == nil {
-		repoPath = abs
-	}
-	metadataPath := filepath.Join(repoPath, ".git")
-
-	lines := strings.Split(string(output), "\n")
-	var worktrees []string
-	seen := make(map[string]struct{})
-	var currentPath string
-
-	appendIfWorktree := func(p string) {
-		if p == "" {
-			return
-		}
-
-		cleanPath := filepath.Clean(strings.TrimSpace(p))
-		if abs, err := filepath.Abs(cleanPath); err == nil {
-			cleanPath = abs
-		}
-
-		if cleanPath == repoPath || cleanPath == metadataPath {
-			return
-		}
-
-		name := filepath.Base(cleanPath)
-		if strings.HasPrefix(cleanPath, repoPath+string(filepath.Separator)) {
-			name = strings.TrimPrefix(cleanPath, repoPath+string(filepath.Separator))
-		}
-		name = strings.TrimSpace(name)
-		if name == "" || name == ".git" {
-			return
-		}
-
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		worktrees = append(worktrees, name)
-	}
-
-	for _, line := range lines {
-		if line == "" {
-			appendIfWorktree(currentPath)
-			currentPath = ""
-			continue
-		}
-
-		if strings.HasPrefix(line, "worktree ") {
-			parts := strings.SplitN(line, " ", 2)
-			if len(parts) == 2 {
-				currentPath = parts[1]
-			}
+	linked := worktrees[:0]
+	for _, wt := range worktrees[1:] {
+		if !wt.Bare && !wt.Prunable {
+			linked = append(linked, wt)
 		}
 	}
+	return linked, nil
+}
 
-	appendIfWorktree(currentPath)
+func WorktreeName(repoPath, worktreePath string) string {
+	if rel, err := filepath.Rel(normalizePathForCompare(repoPath), normalizePathForCompare(worktreePath)); err == nil && rel != "." && !filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.Base(worktreePath)
+}
 
-	return worktrees, nil
+// WorktreeSelectors keeps short names when unique and exposes paths otherwise.
+func WorktreeSelectors(repoPath string, linked []Worktree) []string {
+	selectors := make([]string, len(linked))
+	counts := make(map[string]int, len(linked))
+	for i, wt := range linked {
+		selectors[i] = WorktreeName(repoPath, wt.Path)
+		counts[selectors[i]]++
+	}
+	for i, name := range selectors {
+		if counts[name] > 1 {
+			selectors[i] = linked[i].Path
+		}
+	}
+	return selectors
+}
+
+func (g *gitManager) ListWorktrees(path string) ([]string, error) {
+	linked, err := ListLinkedWorktrees(path)
+	if err != nil || len(linked) == 0 {
+		return nil, err
+	}
+	return WorktreeSelectors(path, linked), nil
 }

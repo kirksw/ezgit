@@ -13,7 +13,7 @@ var rootCmd = &cobra.Command{
 	Use:           "ezgit",
 	Args:          cobra.MaximumNArgs(2),
 	Short:         "An easy GitHub repository management CLI tool",
-	Long:          `ezgit helps manage GitHub repositories with support for cloning, bare conversions, worktrees, and caching.`,
+	Long:          `ezgit helps manage GitHub repositories with support for cloning, linked worktrees, and caching.`,
 	Version:       "v" + version.Value,
 	SilenceErrors: true,
 	SilenceUsage:  true,
@@ -38,7 +38,7 @@ func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "print version and exit")
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "verbose output")
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "config file path (default: ~/.config/ezgit/config.toml or ~/.ezgit.toml)")
-	rootCmd.Flags().BoolVar(&noOpen, "no-open", false, "prepare repository/worktree but do not run open command")
+	rootCmd.Flags().BoolVar(&noOpen, "no-open", false, "prepare or validate the checkout without launching it")
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
@@ -55,6 +55,6 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	case 2:
 		return runRootDirect(cfg, args[0], args[1])
 	default:
-		return fmt.Errorf("usage: ezgit [owner/repo] [worktree]")
+		return fmt.Errorf("usage: ezgit [repo] [worktree]")
 	}
 }

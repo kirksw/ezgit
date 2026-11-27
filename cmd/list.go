@@ -8,7 +8,6 @@ import (
 	"github.com/kirksw/ezgit/internal/config"
 	"github.com/kirksw/ezgit/internal/git"
 	"github.com/kirksw/ezgit/internal/github"
-	"github.com/kirksw/ezgit/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +42,7 @@ var listReposLocalOnly bool
 func init() {
 	rootCmd.AddCommand(listCmd)
 	listCmd.AddCommand(listOrgsCmd, listReposCmd, listWorktreesCmd)
-	listReposCmd.Flags().BoolVar(&listReposLocalOnly, "local", false, "only list repos already cloned under clone_dir")
+	listReposCmd.Flags().BoolVar(&listReposLocalOnly, "local", false, "only list repos already cloned under the Git root")
 }
 
 func runListOrgs(cmd *cobra.Command, args []string) error {
@@ -69,7 +68,7 @@ func runListRepos(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
-		localRepos = utils.BuildLocalRepoMap(cfg.GetCloneDir(), repos)
+		localRepos = localRepoMap(cfg, repos)
 	}
 
 	for _, name := range sortedRepoNames(repos, localRepos, listReposLocalOnly) {
@@ -110,17 +109,16 @@ func runListWorktrees(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	repoFullName, ok := extractRepoFullName(args[0])
-	if !ok {
-		return fmt.Errorf("invalid repo format: %s", args[0])
+	repo, err := parseRepository(args[0])
+	if err != nil {
+		return err
 	}
-
-	repoPath := getRepoPath(cfg, repoFullName, false, resolveDefaultBranch(repoFullName, ""))
+	repoPath := repo.repoPath(cfg)
 	state, err := detectExistingRepoState(repoPath)
 	if err != nil {
 		return err
 	}
-	if state == existingRepoMissing || state == existingRepoRegular {
+	if state == existingRepoMissing {
 		return nil
 	}
 	if state == existingRepoNonRepo {
