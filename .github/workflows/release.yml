@@ -19,7 +19,7 @@ jobs:
       version: ${{ steps.semver.outputs.version }}
       prerelease: ${{ steps.semver.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Validate release tag
@@ -74,9 +74,9 @@ jobs:
             archive: zip
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: Verify source
@@ -103,7 +103,7 @@ jobs:
           else
             tar -C dist -czf "${artifact_name}" "${binary_name}"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ezgit-${{ needs.prepare.outputs.tag }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ezgit-${{ needs.prepare.outputs.tag }}-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.archive }}
@@ -113,8 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [prepare, build]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           pattern: ezgit-${{ needs.prepare.outputs.tag }}-*
@@ -142,7 +142,7 @@ jobs:
           set -euo pipefail
           cd dist
           sha256sum ezgit-${{ needs.prepare.outputs.tag }}-* > SHA256SUMS.txt
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}
