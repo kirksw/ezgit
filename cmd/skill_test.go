@@ -16,7 +16,7 @@ func TestRunSkillPrintsAgentSkill(t *testing.T) {
 	}
 
 	printed := out.String()
-	for _, want := range []string{"---\nname: ezgit\n", "ezgit wt add owner/repo feature-name", "ezgit wt prune owner/repo"} {
+	for _, want := range []string{"---\nname: ezgit\n", "ezgit wt add owner/repo task-agent --base", "ezgit wt prune <repo>"} {
 		if !strings.Contains(printed, want) {
 			t.Fatalf("skill output does not contain %q", want)
 		}

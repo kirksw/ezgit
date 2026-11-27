@@ -31,6 +31,7 @@ type GitHubConfig struct {
 }
 
 type GitConfig struct {
+	Root                     string `toml:"root"`
 	CloneDir                 string `toml:"clone_dir"`
 	OpenCommand              string `toml:"open_command"`
 	ShallowPromptThresholdKB int    `toml:"shallow_prompt_threshold_kb"`
@@ -145,11 +146,19 @@ func (c *Config) GetGitHubToken() string {
 	return os.Getenv("GITHUB_TOKEN")
 }
 
-func (c *Config) GetCloneDir() string {
-	dir := c.Git.CloneDir
+func (c *Config) GetCloneDir() string { return expandHome(c.Git.CloneDir) }
+
+func (c *Config) GetGitRoot() string {
+	if root := strings.TrimSpace(c.Git.Root); root != "" {
+		return expandHome(root)
+	}
+	return expandHome("~/git")
+}
+
+func expandHome(dir string) string {
 	if strings.HasPrefix(dir, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, dir[2:])
+			return filepath.Join(home, dir[2:])
 		}
 	}
 	return dir

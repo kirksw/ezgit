@@ -7,7 +7,6 @@ import (
 	"github.com/kirksw/ezgit/internal/config"
 	"github.com/kirksw/ezgit/internal/github"
 	"github.com/kirksw/ezgit/internal/ui"
-	"github.com/kirksw/ezgit/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -49,15 +48,11 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		defer warnIfBackgroundAutoRefreshFailed(backgroundRefreshDone)
 	}
 
-	cloneDir := cfg.GetCloneDir()
-	localRepos := make(map[string]bool)
+	localRepos := localRepoMap(cfg, allRepos)
 	localOnly := make([]github.Repo, 0, len(allRepos))
-	if cloneDir != "" {
-		localRepos = utils.BuildLocalRepoMap(cloneDir, allRepos)
-		for _, repo := range allRepos {
-			if localRepos[repo.FullName] {
-				localOnly = append(localOnly, repo)
-			}
+	for _, repo := range allRepos {
+		if localRepos[repo.FullName] {
+			localOnly = append(localOnly, repo)
 		}
 	}
 
@@ -97,7 +92,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		if result.Convert {
-			repoPath := getRepoPath(cfg, result.Repo.FullName, false, result.Repo.DefaultBranch)
+			repoPath := getRepoPath(cfg, result.Repo.FullName)
 			return runConvertPath(repoPath, result.Repo.DefaultBranch)
 		}
 		return runOpenRepoSelection(cfg, result.Repo, "")

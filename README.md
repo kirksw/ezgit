@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/kirksw/ezgit/actions/workflows/ci.yml/badge.svg)](https://github.com/kirksw/ezgit/actions/workflows/ci.yml)
 
-CLI for cloning, opening, converting, and caching GitHub repositories with worktree-focused workflows.
+Clone and open Git repositories, create linked worktrees, and discover repositories from a GitHub cache.
 
 ## Table of Contents
 
@@ -33,122 +33,78 @@ nix profile install github:kirksw/ezgit
 ## Quick Start
 
 ```bash
-ezgit                             # fuzzy-pick repo, ensure local, then open
-ezgit facebook/react              # ensure repo exists locally, then open
-ezgit facebook/react my-feature   # ensure named worktree exists, then open
-ezgit --no-open facebook/react    # ensure only (do not run open_command)
+ezgit                                           # open the GitHub repo picker
+ezgit lunarway/hubble-continuum                  # clone if needed, then open
+ezgit wt add lunarway/hubble-continuum feature   # create a branch and linked checkout
+ezgit open lunarway/hubble-continuum feature     # open the existing linked checkout
 ```
 
 ## Commands
 
-### `ezgit [owner/repo] [worktree-name]`
+Repository arguments accept `owner/repo` (GitHub shorthand), `host/owner/repo`, and HTTP(S), SSH, or SCP-style Git URLs.
+The shorthand and host-qualified forms clone over SSH.
+The host, owner, and repo identify the checkout; SSH and HTTPS URLs for that identity share the same path.
+Non-default URL ports are not supported.
+GitHub discovery and the picker use the GitHub cache, but direct commands do not require GitHub authentication for other hosts.
 
-Primary command. It ensures local state, then runs `open_command` unless `--no-open` is set.
+- `ezgit [repo] [worktree]`: no arguments opens the picker; a repo argument clones the primary checkout if needed and opens it; a named worktree must already exist.
+  Use `--no-open` to prepare or validate the checkout without launching it.
+- `ezgit clone <repo>`: create the primary checkout if it does not already exist.
+  Use `--branch`, `--depth`, `--quiet`, or `--key-path` to control cloning.
+- `ezgit open <repo> [worktree]`: run `open_command` for an existing checkout.
+  It never clones, creates worktrees, or converts a repository.
+- `ezgit describe <repo>`: return JSON with the host, local path, layout, and registered linked worktree names.
+- `ezgit list orgs`, `ezgit list repos [--local]`, and `ezgit list worktrees <repo>`: write one name per line.
+- `ezgit cache <subcommand>`: `refresh`, `list`, `search`, or `invalidate`.
+  Use `--force` for a full refresh, or `--ttl` to override cache freshness for the operation.
+- `ezgit skill`: print the embedded agent instructions.
 
-- `ezgit` (no args): fuzzy picker over cached repos, then ensure+open.
-- `ezgit owner/repo`: ensure repo exists (regular clone), then open.
-- `ezgit owner/repo worktree`: ensure worktree exists (worktree layout), then open.
-
-When no worktree is specified, repos in the worktree layout open their default-branch worktree (`main`/`master`, falling back to the first worktree); regular clones open the repo root.
-
-The TUI picker is only available from bare `ezgit`; subcommands stay scriptable.
-
-No-arg picker shortcuts:
-
-- `ctrl+r`: refresh configured organization and personal repository caches, then reopen the picker.
-- `tab`: toggle repo scope `all -> local -> opened`.
-- `left/right`: switch focus between repo list and worktree pane.
-- `enter` in repo pane: open the repo (default-branch worktree for worktree layouts, repo root otherwise).
-- `enter` in worktree pane: open selected worktree; the pane preselects the default branch (`main`/`master`).
-- `enter` on `+ new worktree`: inline create mode (`name[:base]`) and create+open on confirm.
-- `esc` / `ctrl+c`: cancel.
-
-Flags: `--no-open`, `-b` branch, `--depth` shallow clone depth, `-q` quiet, `--key-path` SSH key, `-d` destination directory, `--feature`, `--feature-base`.
-
-Worktree mode is now implicit:
-
-- positional worktree name is provided (`ezgit owner/repo worktree`), or
-- in interactive no-arg flow, more than one worktree is selected.
-
-### `ezgit convert <path>`
-
-Convert a local repository to bare metadata in `.git` + worktrees.
-
-The existing `.git` directory is kept, so remotes, branches, stashes, local config, and hooks all survive.
-Conversion deletes the working tree, so it refuses to run unless that loses nothing. It stops without changing the repository if there are:
-
-- uncommitted, untracked, or ignored files (including files marked assume-unchanged or skip-worktree);
-- existing linked worktrees;
-- a repository already in worktree layout, or a checkout that is itself a linked worktree or submodule.
-
-Commit, move, or remove what it lists (for example `git clean -fdX` for ignored build output), then re-run.
-
-Flags: `-w` create worktree for specific branch(es), `--all-worktrees` create worktree for all branches, `--no-worktrees` skip worktree creation, `--key-path` SSH key.
-
-### Agent-friendly commands
-
-```bash
-ezgit -v                          # print version and exit
-ezgit --version                   # print version and exit
-ezgit list orgs                   # cached org names, one per line
-ezgit list repos                  # all cached repos, one per line
-ezgit list repos --local          # cached repos present under clone_dir
-ezgit list worktrees owner/repo   # local worktrees, one per line
-ezgit describe owner/repo         # JSON: cloned/layout/worktrees/path
-ezgit open owner/repo             # ensure clone, open default worktree (main/master) for worktree layouts, repo root otherwise
-ezgit open owner/repo feature-x   # ensure feature-x in a worktree layout, open it (never converts a regular clone)
-ezgit clone --worktree owner/repo # bare metadata + default-branch worktree
-ezgit clone --bare owner/repo     # alias for --worktree
-ezgit wt add owner/repo feature-x # add feature worktree from default branch
-ezgit wt prune owner/repo         # preview worktrees inactive for 14+ days
-ezgit skill > SKILL.md            # generate the ezgit agent skill
-```
-
-### `ezgit cache <subcommand>`
-
-Cache operations: `refresh`, `list`, `search`, `invalidate`.
-
-Flags (on `cache`): `--force` full refresh (fetch all) instead of incremental update, `--ttl` custom TTL duration (e.g. `24h`).
+In the picker, `tab` cycles repo scopes, `left`/`right` switches panes, `enter` opens the selected checkout, and `esc` or `ctrl+c` cancels.
+Choose `+ new worktree` and enter `name[:base]` to explicitly create and open a linked checkout.
 
 ## Worktree Layout
 
-Worktrees let you check out multiple branches simultaneously without stashing or switching — useful for code review, parallel feature work, and CI investigation.
-
-Non-interactive `clone --worktree` and `clone --bare` create bare metadata plus the default-branch worktree:
+The primary path is a normal checkout; linked worktrees share its Git metadata but keep files and branch checkouts separate:
 
 ```text
-<repo>/.git/      # bare metadata
-<repo>/main/      # default branch worktree (name varies by repository)
-<repo>/<feature>/ # optional feature worktree
+~/git/github.com/lunarway/hubble-continuum/
+~/git/.worktrees/github.com/lunarway/hubble-continuum/feature/
 ```
 
-The interactive worktree planner can also create a detached `review/` worktree.
+`ezgit wt add <repo> <name>` (also `ezgit worktree add`) creates a new branch and linked worktree for an already cloned repository.
+Use a single branch name without slashes.
+Use `--base <ref>` to choose a local ref or commit; otherwise ezgit checks the local `origin/HEAD` ref and falls back to known local default-branch names.
+It does not fetch for you.
+If a branch or destination already exists, creation fails rather than sharing or overwriting another checkout.
+Git determines the location of existing linked worktrees, including ones created by other tools.
+When names collide, `ezgit list worktrees` prints their absolute paths; pass one of those paths to `ezgit open`.
 
-### `ezgit worktree` / `ezgit wt`
+### Parallel agents
 
-Manage worktrees through scriptable commands:
+Clone once and choose a base commit before starting parallel writers.
+Give each writer a unique worktree and branch; pass the returned absolute `path` to the agent harness as its working directory.
 
 ```bash
-ezgit worktree add owner/repo feature-x
-ezgit wt add owner/repo feature-x
-ezgit worktree prune owner/repo             # preview 14-day candidates
-ezgit wt prune owner/repo --apply           # force-remove candidates
-ezgit wt prune owner/repo --older-than 30d  # use another age
+base_commit=$(git -C ~/git/github.com/lunarway/hubble-continuum rev-parse HEAD)
+ezgit wt add lunarway/hubble-continuum fix-code --base "$base_commit" --json
+ezgit wt add lunarway/hubble-continuum fix-test --base "$base_commit" --json
 ```
 
-`add` creates a feature branch and worktree from the repository default branch.
-The existing `ezgit add owner/repo feature-x` command remains an alias-compatible top-level command.
-`prune` uses the newest filesystem modification time in each worktree and previews worktrees older than 14 days by default.
-It always protects `main` and `master`, ignores `.git` metadata timestamps, and keeps branches.
-`--apply` force-removes the listed checkouts, including dirty worktrees.
+Each command prints one JSON object with `path`, `branch`, and the resolved `base_commit`.
+The parent agent integrates and verifies the worker commits before submitting.
+After integration, use `git worktree remove <path>` for explicit cleanup and retain dirty checkouts for inspection.
+`ezgit wt prune <repo>` previews linked checkouts inactive for 14 days by default; use `--older-than 30d` to change the threshold or `--apply` to remove candidates that Git permits removing without force.
+It keeps branches and skips the primary checkout, locked worktrees, and `main` / `master`.
+`--apply` also skips worktrees with local changes, untracked files, or ignored files.
 
-### `ezgit skill`
+### Existing installations
 
-Print an agent-compatible ezgit `SKILL.md` to standard output:
-
-```bash
-ezgit skill > SKILL.md
-```
+Existing clones and bare-layout worktrees are not moved or converted automatically.
+With only `[git].clone_dir` set, GitHub repos continue to resolve under that directory.
+Set `[git].root` to use the new host-aware layout for new clones; if both are set, `clone_dir` remains a GitHub fallback when the canonical path does not exist.
+For the old default `clone_dir = "~/git/github.com"`, the new default already points to the same primary paths.
+Use `wt add` instead of `convert`, `clone --worktree` / `--bare`, `clone <repo> <worktree>`, or `--feature` / `--feature-base`; these deprecated forms retain their old behavior where supported.
+`clone --dest` is also deprecated; managed commands do not look up arbitrary destinations.
 
 ## Config
 
@@ -170,14 +126,14 @@ orgs = ["facebook", "google"]
 private = ["my-org/private-repo"]
 
 [git]
-clone_dir = "~/git/github.com"
+root = "~/git"
 open_command = "sesh connect \"$absPath\""
 shallow_prompt_threshold_kb = 204800
 ```
 
 Clones use your normal ssh setup (agent, `~/.ssh/config`, default keys). Pass `--key-path` to `ezgit` or `ezgit clone` to use a specific key.
 
-Repository arguments must be `owner/repo` or a full URL. Names that could resolve outside `clone_dir`, such as `../repo`, are rejected.
+Names that could resolve outside the configured root, such as `../repo`, are rejected.
 
 Prompts only appear when stdin is a terminal. With stdin redirected, including from `/dev/null`, commands fail with an error rather than wait for input.
 
@@ -189,8 +145,9 @@ GitHub auth resolution order:
 
 ## Open Command Templates
 
-`open_command` runs through `bash -lc` when `ezgit` opens a resolved repo/worktree path and can use:
+`open_command` runs through `bash -c` when `ezgit` opens a resolved repo/worktree path and can use:
 
+- `$host`
 - `$org`
 - `$repo`
 - `$worktree`
@@ -219,11 +176,8 @@ open_command = "tmux new-session -A -s \"$repoPath\" -c \"$absPath\""
 
 ## Zoxide Integration
 
-Repository ensure/clone/convert flows register paths with `zoxide` using `zoxide add`.
-
-- Adds the repo root path.
-- Adds worktree paths (`main`, `review`, and feature worktrees when present).
-- Best-effort only: failures do not fail the command.
+Cloning and adding worktrees register the checkout path with `zoxide add`.
+This is best-effort; zoxide failures do not fail the command.
 
 ## Development
 

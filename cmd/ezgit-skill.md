@@ -1,111 +1,39 @@
 ---
 name: ezgit
-description: Manage GitHub repositories and isolated Git worktrees with ezgit. Use when an agent needs to discover cached repositories, inspect local clone state, clone a repository, create or prune worktrees, or resolve a repository/worktree path before starting work.
+description: Discover GitHub repos, clone repositories, and create isolated Git worktrees for coding agents.
 ---
 
-# ezgit
+# Using ezgit
 
-Use ezgit for repository discovery and worktree lifecycle operations.
-Prefer scriptable subcommands over the interactive no-argument picker.
+Use `ezgit describe <repo>` for the local path, layout, and registered worktree names.
+Use `ezgit list repos` to discover cached GitHub repositories and `ezgit list worktrees <repo>` to list linked checkouts.
+Repo arguments can be `owner/repo` for GitHub, `host/owner/repo`, or a Git URL.
 
-## Discover repositories
-
-```bash
-ezgit list orgs
-ezgit list repos
-ezgit list repos --local
-ezgit describe owner/repo
-ezgit list worktrees owner/repo
-```
-
-`ezgit describe` prints JSON with the repository path, clone state, layout, default branch, and worktrees.
-Use it before assuming that a repository is cloned or uses worktree layout.
-
-## Clone repositories
-
-Create a regular clone:
+## Prepare checkouts
 
 ```bash
 ezgit clone owner/repo
+base_commit=$(git -C ~/git/github.com/owner/repo rev-parse HEAD)
+ezgit wt add owner/repo task-agent --base "$base_commit" --json
 ```
 
-Create bare metadata plus a worktree for the default branch:
+If the root is customized, use the `path` from `ezgit describe <repo>` instead.
+The default primary checkout is `~/git/<host>/<owner>/<repo>`.
+New linked worktrees live at `~/git/.worktrees/<host>/<owner>/<repo>/<name>`.
+Use the `path` returned in JSON as the worker's absolute working directory; `branch` and `base_commit` identify the new branch and its starting commit.
+The name must be unique and contain no slashes.
+A duplicate branch or path is an error, not permission to reuse another worker's checkout.
+Without `--base`, ezgit uses a locally known default branch; it does not fetch.
 
-```bash
-ezgit clone --worktree owner/repo
-# --bare is an alias for --worktree
-ezgit clone --bare owner/repo
-```
+For parallel writers, pin a base commit and create a worktree per agent.
+Assign independent scopes, inspect their commits, then integrate and run combined verification before submitting from the parent agent.
+Do not put a worker in the user's primary checkout or move an existing checkout to fit the default layout.
 
-Non-interactive `--worktree` and `--bare` clones do not create a `review` worktree.
-The interactive planner can select additional worktrees.
+## Open and clean up
 
-## Manage worktrees
-
-Create a feature worktree from the repository default branch:
-
-```bash
-ezgit worktree add owner/repo feature-name
-# short alias
-ezgit wt add owner/repo feature-name
-```
-
-The compatibility command `ezgit add owner/repo feature-name` performs the same operation.
-
-Preview worktrees whose newest file modification is older than 14 days:
-
-```bash
-ezgit worktree prune owner/repo
-ezgit wt prune owner/repo
-```
-
-Remove the listed worktrees, including dirty worktrees, while keeping their branches:
-
-```bash
-ezgit wt prune owner/repo --apply
-```
-
-Use `--older-than 30d` to change the age threshold.
-`main` and `master` are always protected.
-
-List worktrees after changes:
-
-```bash
-ezgit list worktrees owner/repo
-```
-
-## Open or prepare a worktree
-
-Ensure a named worktree exists and run the configured open command:
-
-```bash
-ezgit open owner/repo feature-name
-```
-
-This fails on a regular clone instead of converting it. Convert explicitly first:
-
-```bash
-ezgit convert /path/to/repo
-```
-
-`ezgit convert` refuses to run if uncommitted, untracked, or ignored files, or linked worktrees, would be affected.
-
-Prepare without running the open command:
-
-```bash
-ezgit --no-open owner/repo feature-name
-```
-
-## Agent isolation
-
-Run a worker agent with its working directory set to its dedicated worktree, not the bare repository metadata directory.
-A working directory is not a security boundary: an agent can still modify accessible sibling paths unless the runtime sandbox or filesystem permissions prevent it.
-Use the bare repository only as a coordination location when the coordinator does not edit files.
-
-## Safety
-
-- Inspect state before modifying it with `ezgit describe owner/repo`.
-- Run `ezgit wt prune owner/repo` without `--apply` first and review every candidate.
-- Treat `--apply` as destructive because it force-removes dirty worktrees.
-- Do not assume the default branch is named `main`.
-- Do not use the no-argument TUI in automation.
+`ezgit open <repo> [worktree]` launches an existing checkout and does not create it.
+Agents should use the absolute path directly rather than launching another session.
+After integrating a worker's commits, use `git worktree remove <path>` for explicit cleanup.
+Keep dirty and failed worktrees for inspection.
+Check for ignored files before removing a worktree directly with Git.
+`ezgit wt prune <repo>` previews stale linked checkouts; `--apply` skips worktrees with local changes, untracked files, or ignored files, and keeps branches.

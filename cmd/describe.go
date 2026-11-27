@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/kirksw/ezgit/internal/config"
 	"github.com/kirksw/ezgit/internal/git"
@@ -19,6 +18,7 @@ var describeCmd = &cobra.Command{
 }
 
 type repoDescription struct {
+	Host          string   `json:"host"`
 	FullName      string   `json:"full_name"`
 	DefaultBranch string   `json:"default_branch"`
 	Path          string   `json:"path"`
@@ -52,17 +52,17 @@ func runDescribe(cmd *cobra.Command, args []string) error {
 }
 
 func describeRepo(cfg *config.Config, repoInput string, lister repoWorktreeLister) (repoDescription, error) {
-	repoFullName, ok := extractRepoFullName(repoInput)
-	if !ok {
-		return repoDescription{}, fmt.Errorf("invalid repo format: %s", repoInput)
+	repo, err := parseRepository(repoInput)
+	if err != nil {
+		return repoDescription{}, err
 	}
+	defaultBranch := ""
+	if repo.Host == githubHost {
+		defaultBranch = resolveDefaultBranch(repo.fullName(), "")
+	}
+	desc := repoDescription{Host: repo.Host, FullName: repo.fullName(), DefaultBranch: defaultBranch, Layout: "unknown"}
+	repoPath := repo.repoPath(cfg)
 
-	defaultBranch := resolveDefaultBranch(repoFullName, "")
-	desc := repoDescription{FullName: repoFullName, DefaultBranch: defaultBranch, Layout: "unknown"}
-	repoPath := getRepoPath(cfg, repoFullName, false, defaultBranch)
-	if strings.TrimSpace(repoPath) == "" {
-		return desc, nil
-	}
 	if abs, err := filepath.Abs(repoPath); err == nil {
 		repoPath = abs
 	}
@@ -76,7 +76,7 @@ func describeRepo(cfg *config.Config, repoInput string, lister repoWorktreeListe
 	desc.Layout = repoLayout(state)
 	desc.Cloned = state == existingRepoRegular || state == existingRepoWorktree
 	desc.Worktree = state == existingRepoWorktree
-	if state == existingRepoWorktree && lister != nil {
+	if desc.Cloned && lister != nil {
 		worktrees, err := lister.ListWorktrees(repoPath)
 		if err != nil {
 			return desc, fmt.Errorf("failed to list worktrees: %w", err)

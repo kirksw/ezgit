@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -11,60 +10,50 @@ import (
 	"github.com/kirksw/ezgit/internal/git"
 	"github.com/kirksw/ezgit/internal/github"
 	"github.com/kirksw/ezgit/internal/ui"
-	"github.com/kirksw/ezgit/internal/utils"
 )
 
 func runRootDirect(cfg *config.Config, repoInput string, worktreeName string) error {
-	repoFullName, ok := extractRepoFullName(repoInput)
-	if !ok {
-		return fmt.Errorf("invalid repo format: %s", repoInput)
+	if cloneDest != "" {
+		return fmt.Errorf("--dest is only supported by ezgit clone")
 	}
-
-	worktreeName = strings.TrimSpace(worktreeName)
-	if worktreeName != "" {
-		if err := runCloneWithWorktree(cfg, repoFullName, worktreeName); err != nil {
+	repo, err := parseRepository(repoInput)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(worktreeName) == "" {
+		if err := preparePrimaryCheckout(cfg, repo, "", 0); err != nil {
 			return err
 		}
 		if noOpen {
 			return nil
 		}
-		return runOpenCommand(cfg, repoFullName, worktreeName)
+	} else if noOpen {
+		_, err := buildOpenCommandContext(cfg, repoInput, worktreeName)
+		return err
 	}
+	return runOpenCommand(cfg, repoInput, worktreeName)
+}
 
-	defaultBranch := resolveDefaultBranch(repoFullName, "")
-	repoPath := getRepoPath(cfg, repoFullName, false, defaultBranch)
-	localExists := false
-	if repoPath != "" {
-		if _, err := os.Stat(repoPath); err == nil {
-			localExists = true
-		}
+func preparePrimaryCheckout(cfg *config.Config, repo repository, defaultBranch string, sizeHint int) error {
+	path := repo.repoPath(cfg)
+	state, err := detectExistingRepoState(path)
+	if err != nil {
+		return err
 	}
-
-	if !localExists {
-		originalWorktree := worktree
-		originalSkipPrompt := skipWorktreePrompt
-		originalForcedPlan := forcedClonePlan
-		worktree = false
-		skipWorktreePrompt = false
-		forcedClonePlan = nil
-		err := runDirectClone(cfg, repoFullName, defaultBranch, 0)
-		worktree = originalWorktree
-		skipWorktreePrompt = originalSkipPrompt
-		forcedClonePlan = originalForcedPlan
-		if err != nil {
-			return err
-		}
-	}
-
-	if noOpen {
+	switch state {
+	case existingRepoMissing:
+		return runDirectClone(cfg, repo.URL, defaultBranch, sizeHint)
+	case existingRepoNonRepo:
+		return fmt.Errorf("destination exists but is not a git repository: %s", path)
+	default:
 		return nil
 	}
-
-	repo := &github.Repo{FullName: repoFullName, DefaultBranch: defaultBranch}
-	return runOpenRepoSelection(cfg, repo, "")
 }
 
 func runRootFuzzy(cfg *config.Config) error {
+	if cloneDest != "" {
+		return fmt.Errorf("--dest is only supported by ezgit clone")
+	}
 	c := cache.New()
 	allRepos, err := c.GetAllRepos()
 	if err != nil {
@@ -103,7 +92,7 @@ func runRootFuzzy(cfg *config.Config) error {
 
 	go func() {
 		defer buildWg.Done()
-		localRepos = utils.BuildLocalRepoMap(cfg.GetCloneDir(), allRepos)
+		localRepos = localRepoMap(cfg, allRepos)
 	}()
 
 	go func() {
@@ -119,23 +108,7 @@ func runRootFuzzy(cfg *config.Config) error {
 
 	buildWg.Wait()
 
-	worktreeLoader := func(repo github.Repo) ([]string, error) {
-		if !localRepos[repo.FullName] {
-			return nil, nil
-		}
-
-		repoPath := getRepoPath(cfg, repo.FullName, false, repo.DefaultBranch)
-		if strings.TrimSpace(repoPath) == "" {
-			return nil, nil
-		}
-
-		gitMgr := git.New()
-		worktrees, err := gitMgr.ListWorktrees(repoPath)
-		if err != nil {
-			return nil, err
-		}
-		return worktrees, nil
-	}
+	worktreeLoader := buildOpenWorktreeLoader(cfg, localRepos, git.New())
 
 	result, err := ui.RunOpenFuzzySearchWithOpenedAndLoader(allRepos, localRepos, openedRepos, openedWorktrees, nil, worktreeLoader)
 	if err != nil {
@@ -145,96 +118,24 @@ func runRootFuzzy(cfg *config.Config) error {
 		return nil
 	}
 
-	repo := result.Repo
-	if result.CreateWorktree {
-		if err := runCloneWithWorktreeAndBase(cfg, repo.FullName, result.SelectedWorktree, result.WorktreeBase); err != nil {
+	selected, err := parseRepository(result.Repo.FullName)
+	if err != nil {
+		return err
+	}
+	if result.CreateWorktree || result.SelectedWorktree == "" {
+		if err := preparePrimaryCheckout(cfg, selected, result.Repo.DefaultBranch, result.Repo.Size); err != nil {
 			return err
 		}
-		if noOpen {
-			return nil
-		}
-		return runOpenCommand(cfg, repo.FullName, result.SelectedWorktree)
 	}
-
-	repoPath := getRepoPath(cfg, repo.FullName, false, repo.DefaultBranch)
-	localExists := false
-	if repoPath != "" {
-		if _, err := os.Stat(repoPath); err == nil {
-			localExists = true
+	if result.CreateWorktree {
+		if _, err := createLinkedWorktree(cfg, selected, result.SelectedWorktree, result.WorktreeBase); err != nil {
+			return err
 		}
 	}
-
-	if !localExists {
-		defaultBranch := resolveDefaultBranch(repo.FullName, repo.DefaultBranch)
-		shouldUseWorktrees := false
-		selectedPlan := cloneWorktreePlan{}
-
-		if isInteractiveStdin() {
-			plan, cancelled, planErr := ui.RunCloneWorktreePlanPrompt([]string{defaultBranch}, defaultBranch, false)
-			if planErr != nil {
-				return fmt.Errorf("failed to configure clone options: %w", planErr)
-			}
-			if cancelled {
-				return nil
-			}
-
-			selectedCount := 0
-			if plan.CreateDefault {
-				selectedCount++
-			}
-			if plan.CreateReview {
-				selectedCount++
-			}
-			selectedCount += len(plan.Custom)
-			shouldUseWorktrees = selectedCount > 1
-
-			if shouldUseWorktrees {
-				selectedPlan.CreateDefault = plan.CreateDefault
-				selectedPlan.CreateReview = plan.CreateReview
-				for _, custom := range plan.Custom {
-					selectedPlan.Custom = append(selectedPlan.Custom, cloneCustomWorktree{
-						Name:       custom.Name,
-						BaseBranch: custom.BaseBranch,
-					})
-				}
-			}
-		}
-
-		originalWorktree := worktree
-		originalSkipPrompt := skipWorktreePrompt
-		originalForcedPlan := forcedClonePlan
-		originalFeature := featureWorktree
-		originalFeatureBase := featureBaseBranch
-
-		worktree = shouldUseWorktrees
-		skipWorktreePrompt = shouldUseWorktrees
-		featureWorktree = ""
-		featureBaseBranch = ""
-		if shouldUseWorktrees {
-			forcedClonePlan = &selectedPlan
-		} else {
-			forcedClonePlan = nil
-		}
-
-		cloneErr := runDirectClone(cfg, repo.FullName, repo.DefaultBranch, repo.Size)
-
-		worktree = originalWorktree
-		skipWorktreePrompt = originalSkipPrompt
-		forcedClonePlan = originalForcedPlan
-		featureWorktree = originalFeature
-		featureBaseBranch = originalFeatureBase
-
-		if cloneErr != nil {
-			return fmt.Errorf("failed to clone repo: %w", cloneErr)
-		}
-
-		localRepos[repo.FullName] = true
-	}
-
 	if noOpen {
 		return nil
 	}
-	return runOpenCommand(cfg, repo.FullName, result.SelectedWorktree)
+	return runOpenCommand(cfg, result.Repo.FullName, result.SelectedWorktree)
 }
 
 func buildOpenedRepoMap(allRepos []github.Repo) map[string]bool {
@@ -351,7 +252,7 @@ func buildLocalRepoWorktreeMapWithLister(cfg *config.Config, allRepos []github.R
 				if !localRepos[repo.FullName] {
 					continue
 				}
-				repoPath := getRepoPath(cfg, repo.FullName, false, repo.DefaultBranch)
+				repoPath := getRepoPath(cfg, repo.FullName)
 				if strings.TrimSpace(repoPath) == "" {
 					continue
 				}

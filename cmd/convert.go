@@ -27,6 +27,8 @@ var (
 
 func init() {
 	rootCmd.AddCommand(convertCmd)
+	convertCmd.Hidden = true
+	convertCmd.Deprecated = "normal clones support linked worktrees; use ezgit wt add instead"
 
 	convertCmd.Flags().StringSliceVarP(&worktrees, "worktree", "w", []string{}, "create worktree for specific branch")
 	convertCmd.Flags().BoolVar(&allWorktrees, "all-worktrees", false, "create worktree for all branches")
