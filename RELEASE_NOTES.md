@@ -1,12 +1,19 @@
 # Release Notes
 
-## 0.0.20 - 2026-11-05
+## 0.0.20 - 2026-11-27
+
+Repository and worktree layout:
+- Primary clones use `~/git/<host>/<owner>/<repo>` by default and accept host-qualified names and Git URLs in addition to GitHub shorthand.
+- `ezgit wt add` creates a separate linked checkout under `~/git/.worktrees/<host>/<owner>/<repo>/<name>` without converting the primary clone.
+  Use `--base` to choose a starting ref or commit and `--json` to return the checkout path, branch, and base commit.
+- `ezgit wt prune` previews inactive worktrees; `--apply` removes eligible clean checkouts without deleting branches.
+- The picker can create and open a linked worktree explicitly.
+  `ezgit open` only opens existing checkouts.
 
 Data-loss fixes:
 - `ezgit convert` no longer discards work: it refuses to run while uncommitted, untracked, or ignored files or linked worktrees exist, and refuses repositories already in worktree layout, which previously lost every worktree.
 - Conversion now keeps the existing `.git` directory, so `origin`, remote branches, stashes, local config, and hooks survive. Previously `origin` was repointed at the repository's own path and remote branches were dropped.
 - `-w` branches are validated before the repository changes.
-- `ezgit open <repo> <worktree>` no longer converts a regular clone silently; it now fails and points to `ezgit convert`.
 
 Non-interactive behavior:
 - Stdin from `/dev/null` is no longer treated as a terminal, and end of input now cancels the existing-clone prompt. Previously this looped forever, writing output without limit.
@@ -19,6 +26,8 @@ SSH:
 - `~/.ssh/id_rsa` is no longer required. Clones use your normal ssh setup unless `--key-path` is passed, and existing repositories no longer need a valid key.
 
 Upgrade notes:
+- Existing clones and worktrees are not moved or converted.
+  Set `[git].root` to change the default `~/git` root; `[git].clone_dir` remains supported for legacy GitHub clones.
 - Move any `./config.toml` you rely on to `~/.config/ezgit/config.toml`, or pass `--config`.
 - Repositories converted by earlier versions may still have `origin` pointing at their own path. Check with `git -C <repo>/.git remote get-url origin` and fix with `git remote set-url origin <url>`, then add the refspec with `git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"` and run `git fetch origin`.
 
